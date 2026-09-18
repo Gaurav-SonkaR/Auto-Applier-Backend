@@ -1,0 +1,134 @@
+{
+  "personal": {
+    "name": "Gaurav Sonkar",
+    "email": "gauravsonkar.bhu@gmail.com",
+    "phone": "+91-9131930576",
+    "linkedin": "linkedin.com/in/gauravsonkar953bhu",
+    "github": "github.com/Gaurav-SonkaR",
+    "kaggle": "kaggle.com/gauravsonkarbhu2025",
+    "location": "India (Open to Relocation)"
+  },
+  "primary_skills": [
+    "Python", "JavaScript (ES6+)", "TypeScript", "SQL", "Java", "C/C++",
+    "Django", "Django REST Framework", "FastAPI", "Flask",
+    "REST API Design", "Microservices", "WSGI/ASGI",
+    "LangChain", "LangGraph", "RAG Pipelines", "FAISS", "Chroma",
+    "LLM Agents", "Prompt Engineering", "Embeddings",
+    "React.js", "Vue.js", "HTML5", "CSS3", "Tailwind CSS", "Bootstrap",
+    "PostgreSQL", "MySQL", "MongoDB", "Redis",
+    "Query Optimization", "Indexing", "CTEs", "Window Functions",
+    "AWS", "EC2", "S3", "RDS", "Docker", "CI/CD", "Git",
+    "Linux", "Ubuntu", "SSH", "Nginx",
+    "Playwright", "Selenium", "BeautifulSoup", "Scrapy", "Pandas", "openpyxl",
+    "Scikit-learn", "PyTorch", "NumPy", "Power BI", "Matplotlib", "Seaborn"
+  ],
+  "secondary_skills": [
+    "Spring Boot", "Kubernetes", "Terraform", "GraphQL",
+    "Elasticsearch", "Kafka", "gRPC"
+  ],
+  "experience": [
+    {
+      "title": "Software Developer",
+      "company": "Divyal Technology Pvt. Ltd.",
+      "client": "Tracsis PLC, UK",
+      "location": "Bhilai, CG",
+      "start_date": "Jun 2025",
+      "end_date": "Present",
+      "bullets": [
+        "Designed and deployed 25+ production REST APIs using Django REST Framework for a UK transport analytics platform; served Vue.js web and Android mobile clients.",
+        "Reduced API response latency by 30% via PostgreSQL/MySQL query tuning, composite indexing, and connection pool optimization on high-traffic endpoints.",
+        "Containerized microservices with Docker; deployed to AWS EC2 via SSH — eliminated environment drift and improved release efficiency by 40% across dev/staging/prod.",
+        "Secured APIs with JWT authentication, RBAC, pagination, and global exception handling; automated CI/CD pipelines with structured Git branching and peer code reviews.",
+        "Developed Python automation scripts to eliminate repetitive manual tasks; supported AI-enabled backend data pipelines in an Agile Scrum environment."
+      ]
+    },
+    {
+      "title": "Software Developer Intern",
+      "company": "Divyal Technology Pvt. Ltd.",
+      "client": "Tracsis PLC, UK",
+      "location": "Bhilai, CG",
+      "start_date": "Feb 2025",
+      "end_date": "May 2025",
+      "bullets": [
+        "Built Vue.js frontend components and Django REST APIs for Passenger Management Dashboard; designed MySQL schemas, optimized queries, and supported AWS Linux deployments.",
+        "Promoted to full-time Software Developer within 4 months based on outstanding performance and consistent delivery."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "AI Research Agentic System",
+      "tech_stack": ["LangGraph", "LangChain", "FAISS", "Chroma", "DeepSeek R1", "FastAPI", "Docker"],
+      "bullets": [
+        "Architected production-ready multi-agent LLM backend with LangGraph: document ingestion, semantic chunking, FAISS/Chroma vector indexing, and structured response generation with citation validation.",
+        "Improved retrieval precision 76% to 92% by optimizing chunk size, overlap, and embedding model selection; evaluated via Precision@K; reduced hallucination via prompt engineering and structured grounding.",
+        "Exposed via FastAPI async REST endpoints with Pydantic validation and Dockerized deployment on Linux."
+      ]
+    },
+    {
+      "name": "Enterprise E-Commerce Platform",
+      "tech_stack": ["React.js", "Django REST", "PostgreSQL", "Redis", "JWT", "Docker", "AWS EC2"],
+      "bullets": [
+        "Full-stack application: React.js SPA frontend and Django REST Framework backend with JWT/OAuth2 auth, RBAC, product catalog, cart, and order management APIs.",
+        "Integrated Redis caching — reduced DB round-trips by 60%; deployed via Docker Compose on AWS EC2; documented with Swagger/OpenAPI."
+      ]
+    },
+    {
+      "name": "Online Fraud Detection System",
+      "tech_stack": ["Scikit-learn", "Random Forest", "SMOTE", "Django REST", "Pandas", "PostgreSQL"],
+      "bullets": [
+        "End-to-end ML pipeline on 284K-row imbalanced dataset; SMOTE + Random Forest achieved 99.96% accuracy and 0.97 AUC-ROC; deployed real-time inference REST API via Django REST for live transaction scoring."
+      ]
+    },
+    {
+      "name": "Automated Web Scraping & Report Generator",
+      "tech_stack": ["Python", "Playwright", "Selenium", "BeautifulSoup", "openpyxl", "Pandas"],
+      "bullets": [
+        "Automated pipeline for dynamic web scraping and structured Excel report generation; handled pagination, login flows, anti-bot measures, scheduled execution, data validation, and deduplication."
+      ]
+    }
+  ],
+  "education": {
+    "degree": "Master of Computer Application (MCA)",
+    "institution": "Banaras Hindu University (BHU), Varanasi",
+    "start_date": "Oct 2023",
+    "end_date": "Jun 2025",
+    "relevant_courses": [
+      "Machine Learning", "DBMS", "Operating Systems",
+      "Computer Networks", "DSA", "OOP", "System Design"
+    ]
+  },
+  "achievements": [
+    "Promoted intern to full-time Software Developer at Divyal Technology within 4 months for exceptional delivery.",
+    "RAG retrieval precision improved +16% (76% to 92%) in production AI system.",
+    "Power BI dashboard projected 12% revenue uplift on 10K+ sales records.",
+    "Active on LeetCode, HackerRank, Coding Ninjas (DSA/SQL), Kaggle (fraud detection & sales forecasting notebooks)."
+  ],
+  "llm_rules": {
+    "locked_fields": [
+      "personal.name", "personal.email", "personal.phone",
+      "personal.linkedin", "personal.github", "personal.kaggle",
+      "experience[*].company", "experience[*].client",
+      "experience[*].title", "experience[*].start_date", "experience[*].end_date",
+      "education.institution", "education.degree",
+      "education.start_date", "education.end_date"
+    ],
+    "variable_fields": [
+      "summary (rewrite per JD, max 70 words)",
+      "primary_skills row order (reorder to match JD)",
+      "experience[*].bullets (swap keywords, keep metrics)",
+      "projects order (most relevant first)"
+    ],
+    "secondary_skill_rule": "Secondary skills may only appear on resume if they appear in the JD's required_skills list.",
+    "content_limits": {
+      "summary_max_words": 70,
+      "summary_max_lines": 4,
+      "experience_max_bullets_per_role": 5,
+      "experience_bullet_max_words": 25,
+      "project_max_bullets": 3,
+      "project_bullet_max_words": 22,
+      "max_projects_on_resume": 4,
+      "achievements_max_lines": 3
+    }
+  }
+}

@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.git/
+.gitignore
+
+# Runtime state — provided by volumes, never baked into the image.
+data/
+resumes/
+screenshots/
+logs/
+
+# Secrets — passed at runtime via env_file.
+.env
+
+tests/
+pytest.ini
+README.md

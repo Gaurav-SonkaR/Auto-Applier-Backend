@@ -1,0 +1,40 @@
+# ── Secrets ───────────────────────────────────────────────────────────────────
+# .env holds the Gmail App Password, the LinkedIn and Naukri passwords, the
+# Groq / Serper / HuggingFace keys, and AUTH_SECRET_KEY — which is what signs
+# login tokens, so leaking it lets anyone mint a session for any account.
+.env
+.env.*
+!.env.example
+
+# ── Personal data ─────────────────────────────────────────────────────────────
+# The database carries every account's scrypt password hash and master profile
+# (name, phone, employers). The -wal/-shm files carry recent writes.
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Uploaded contact lists are other people's names and email addresses.
+data/uploads/
+
+# Generated resumes and the uploaded resume library are full personal CVs.
+resumes/
+screenshots/
+
+# Playwright session state for the job portals: these are live logins, so a
+# committed copy is account access, not just a credential.
+logs/
+
+# Vector store built from scraped job descriptions.
+data/chroma/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/

@@ -1,0 +1,22 @@
+# The LaTeX template MUST stay LF-only.
+#
+# resume_generator.py locates its three injection points with regexes anchored
+# on \n. With CRLF endings every one of them silently fails to match: injection
+# no-ops, no error is raised, and the generic seed resume ships to the employer
+# looking exactly like a successful tailored generation.
+#
+# Git's core.autocrlf=true (the Windows default) would do this on checkout.
+# tests/test_resume_template.py::test_uses_lf_line_endings is the backstop.
+*.tex text eol=lf
+
+# Same reasoning for the profile the generator reads.
+master_profile.json text eol=lf
+
+# Keep source and config endings stable across platforms.
+*.py text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.ini text eol=lf
+Dockerfile text eol=lf
+.env.example text eol=lf

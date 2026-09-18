@@ -1,0 +1,355 @@
+"""
+Shared per-job pipeline: the LangGraph node chain (fetch_jd → parse → resume →
+apply), its status classification, and the run-loop/finalize logic that both
+run_portal_apply() (portal_apply_flow.py) and run_discovery_pipeline()
+(discovery_flow.py) drive identically once they've each produced their own
+list of job_ids to process.
+
+Extracted after job_id fetch/discovery logic diverged (portal scraping vs.
+Serper search) but the downstream per-job processing didn't — the two flows'
+run loops had drifted out of sync once already (discovery_flow.py was left on
+old FLAGGED-only status logic after this module's statuses were made
+granular), which is exactly the class of bug a single shared implementation
+prevents.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import time
+from datetime import datetime, timezone
+from typing import Optional
+
+from langgraph.graph import END, StateGraph
+from sqlmodel import Session
+
+from backend.config import get_settings
+from backend.db.database import engine
+from backend.models.job import Job, JobStatus
+from backend.models.job_stage_event import JobStageEvent
+from backend.models.run_log import RunLog, RunStatus
+from backend.services.browser_pool import browser_semaphore
+from backend.services.portal_templates import get_template
+from workflows.agents.apply_agent import apply_to_job
+from workflows.agents.jd_parser_agent import parse_jd
+from workflows.agents.resume_agent import generate_resume
+from workflows.state import EventCallback, FlowEvent, PipelineState, RunResult
+from workflows.types import ParsedJD
+
+logger = logging.getLogger("flow.run_loop")
+
+# Statuses that stop mid-graph progression — a job in any of these needs a human
+# (or was excluded pre-pipeline) and must not silently advance to the next node.
+HALTING_STATUSES = (
+    JobStatus.FAILED, JobStatus.FLAGGED,
+    JobStatus.WAITING_CAPTCHA, JobStatus.WAITING_LOGIN, JobStatus.WAITING_OTP,
+    JobStatus.NEED_HUMAN_ACTION,
+    JobStatus.DUPLICATE, JobStatus.SKIPPED, JobStatus.BLACKLISTED,
+)
+HALTING_STATUS_VALUES = tuple(s.value for s in HALTING_STATUSES)
+
+# Coarse "needs human attention" bucket — all roll up into RunLog.jobs_flagged
+NEED_HUMAN_STATUSES = (
+    JobStatus.FLAGGED, JobStatus.WAITING_CAPTCHA, JobStatus.WAITING_LOGIN,
+    JobStatus.WAITING_OTP, JobStatus.NEED_HUMAN_ACTION,
+)
+NEED_HUMAN_STATUS_VALUES = tuple(s.value for s in NEED_HUMAN_STATUSES)
+
+# Pre-pipeline exclusion statuses — never re-entered, counted as skipped in a run
+PRE_EXCLUDED_STATUSES = (JobStatus.DUPLICATE, JobStatus.SKIPPED, JobStatus.BLACKLISTED)
+PRE_EXCLUDED_STATUS_VALUES = tuple(s.value for s in PRE_EXCLUDED_STATUSES)
+
+# ── Node implementations ───────────────────────────────────────────────────────
+
+async def _fetch_jd_node(state: PipelineState) -> dict:
+    """Navigate to the job URL and extract the description text."""
+    # Checkpoint: already fetched in a previous run — skip and preserve status
+    if state.get("jd_text"):
+        return {"jd_text": state["jd_text"], "status": state.get("status"), "error": ""}
+
+    from playwright.async_api import async_playwright
+    from playwright_stealth import Stealth
+
+    settings = get_settings()
+    template = get_template(state["portal"])
+    sel = template.selectors.job_description_container
+
+    jd_text = ""
+    try:
+        async with browser_semaphore(), async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=settings.playwright_headless)
+            try:
+                ctx = await browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/125.0.0.0 Safari/537.36"
+                    )
+                )
+                page = await ctx.new_page()
+                await Stealth().apply_stealth_async(page)
+                await page.goto(state["url"], wait_until="domcontentloaded", timeout=25_000)
+
+                if sel:
+                    try:
+                        el = await page.wait_for_selector(sel, timeout=8_000)
+                        if el:
+                            jd_text = (await el.inner_text()).strip()
+                    except Exception:
+                        # Fall back to body text
+                        jd_text = await page.inner_text("body")
+                else:
+                    jd_text = await page.inner_text("body")
+            finally:
+                # Guarantee the browser process is closed even if navigation/selector
+                # lookup above raises — a bare except-without-close here would leak
+                # a Chromium process on every failed JD fetch.
+                await browser.close()
+    except Exception as exc:
+        logger.warning("fetch_jd failed for job %d: %s", state["job_id"], exc)
+        return {"jd_text": "", "status": JobStatus.FAILED, "error": f"JD fetch failed: {exc}"}
+
+    # Persist jd_text to DB
+    with Session(engine) as session:
+        job = session.get(Job, state["job_id"])
+        if job:
+            job.jd_text = jd_text[:8000]
+            job.updated_at = datetime.now(timezone.utc)
+            session.add(job)
+            session.commit()
+
+    logger.info("Job %d: fetched %d chars of JD text", state["job_id"], len(jd_text))
+    return {"jd_text": jd_text[:8000], "status": JobStatus.SCRAPED, "error": ""}
+
+
+async def _parse_node(state: PipelineState) -> dict:
+    """Call LLM to parse the job description."""
+    # Checkpoint: already parsed (PARSED or RESUME_READY) — skip and preserve status
+    if state.get("parsed_jd") and state.get("status") in (
+        JobStatus.PARSED, JobStatus.RESUME_READY,
+        JobStatus.PARSED.value, JobStatus.RESUME_READY.value,
+    ):
+        return {"parsed_jd": state["parsed_jd"], "status": state.get("status"), "error": ""}
+
+    if not state.get("jd_text"):
+        return {"status": JobStatus.FAILED, "error": "No JD text to parse"}
+    try:
+        parsed: ParsedJD = await parse_jd(state["jd_text"], state["job_id"])
+        return {"parsed_jd": parsed.raw, "status": JobStatus.PARSED, "error": ""}
+    except Exception as exc:
+        logger.error("parse_jd failed for job %d: %s", state["job_id"], exc)
+        return {"status": JobStatus.FAILED, "error": str(exc)[:300]}
+
+
+async def _resume_node(state: PipelineState) -> dict:
+    """Generate and compile the ATS-tailored PDF resume."""
+    # Checkpoint: resume already generated (RESUME_READY) — skip
+    if state.get("resume_path") and state.get("status") in (
+        JobStatus.RESUME_READY, JobStatus.RESUME_READY.value
+    ):
+        return {"resume_path": state["resume_path"], "status": state.get("status"), "error": ""}
+
+    raw = state.get("parsed_jd") or {}
+    parsed = ParsedJD(
+        required_skills=raw.get("required_skills", []),
+        nice_to_have=raw.get("nice_to_have", []),
+        keywords=raw.get("keywords", []),
+        experience_years=raw.get("experience_years"),
+        role_level=raw.get("role_level", "mid"),
+        raw=raw,
+    )
+    try:
+        pdf_path = await generate_resume(state["job_id"], parsed)
+        return {"resume_path": pdf_path, "status": JobStatus.RESUME_READY, "error": ""}
+    except Exception as exc:
+        logger.error("generate_resume failed for job %d: %s", state["job_id"], exc)
+        return {"status": JobStatus.FAILED, "error": str(exc)[:300]}
+
+
+async def _apply_node(state: PipelineState) -> dict:
+    """Submit the application via Playwright."""
+    resume_path = state.get("resume_path", "")
+    if not resume_path:
+        return {"status": JobStatus.FAILED, "error": "No resume path — resume_node must have failed"}
+
+    with Session(engine) as session:
+        job = session.get(Job, state["job_id"])
+        if not job:
+            return {"status": JobStatus.FAILED, "error": f"Job {state['job_id']} not found in DB"}
+        result = await apply_to_job(job, resume_path, session)
+
+    return {
+        "status": result.status,
+        "error": result.reason or "",
+    }
+
+
+# ── Routing ───────────────────────────────────────────────────────────────────
+
+def _is_halting(status) -> bool:
+    return status in HALTING_STATUSES or status in HALTING_STATUS_VALUES
+
+
+def _after_fetch(state: PipelineState) -> str:
+    return END if _is_halting(state["status"]) else "parse"
+
+
+def _after_parse(state: PipelineState) -> str:
+    return END if _is_halting(state["status"]) else "resume"
+
+
+def _after_resume(state: PipelineState) -> str:
+    return END if _is_halting(state["status"]) else "apply"
+
+
+# ── Graph builder ─────────────────────────────────────────────────────────────
+
+def _build_graph():
+    g = StateGraph(PipelineState)
+    g.add_node("fetch_jd", _fetch_jd_node)
+    g.add_node("parse", _parse_node)
+    g.add_node("resume", _resume_node)
+    g.add_node("apply", _apply_node)
+    g.set_entry_point("fetch_jd")
+    g.add_conditional_edges("fetch_jd", _after_fetch, {"parse": "parse", END: END})
+    g.add_conditional_edges("parse", _after_parse, {"resume": "resume", END: END})
+    g.add_conditional_edges("resume", _after_resume, {"apply": "apply", END: END})
+    g.add_edge("apply", END)
+    return g.compile()
+
+
+JOB_GRAPH = _build_graph()
+
+
+# ── Checkpoint: determine which node to start from ────────────────────────────
+
+def entry_state_for(job: Job) -> Optional[dict]:
+    """
+    Build the initial PipelineState for a job, respecting existing progress.
+    Returns None if the job should be skipped entirely (already APPLIED, or a
+    pre-pipeline exclusion state: DUPLICATE/SKIPPED/BLACKLISTED).
+    """
+    if job.status == JobStatus.APPLIED or job.status in PRE_EXCLUDED_STATUSES:
+        return None
+    base: dict = {
+        "job_id": job.job_id,
+        "url": job.url,
+        "portal": job.portal,
+        "title": job.title or "",
+        "jd_text": job.jd_text or "",
+        "parsed_jd": json.loads(job.parsed_jd) if job.parsed_jd else {},
+        "resume_path": job.resume_path or "",
+        "status": job.status.value,
+        "error": "",
+    }
+    return base
+
+
+async def emit_event(callback: Optional[EventCallback], event: FlowEvent) -> None:
+    if callback is not None:
+        try:
+            await callback(event)
+        except Exception as exc:
+            logger.debug("Event callback error: %s", exc)
+
+
+# ── Shared per-job loop ────────────────────────────────────────────────────────
+
+async def run_job_graph_loop(
+    job_ids: list[int],
+    run_log_id: int,
+    on_event: Optional[EventCallback],
+    result: RunResult,
+    start_message: str = "Starting pipeline for '{title}'",
+) -> None:
+    """
+    Drive job_ids through JOB_GRAPH one at a time, classifying each job's final
+    status into result.jobs_applied/jobs_flagged/jobs_skipped/jobs_failed and
+    persisting FAILED + a JobStageEvent on any non-terminal-success outcome.
+    Mutates `result` in place — shared by run_portal_apply() and
+    run_discovery_pipeline() so their status handling can never drift apart again.
+    """
+    for job_id in job_ids:
+        with Session(engine) as session:
+            job = session.get(Job, job_id)
+            if not job:
+                continue
+
+        initial_state = entry_state_for(job)
+        if initial_state is None:
+            result.jobs_skipped += 1
+            continue
+
+        await emit_event(on_event, FlowEvent(
+            run_id=run_log_id, job_id=job_id, node="start",
+            status="running", message=start_message.format(title=job.title, url=job.url),
+        ))
+
+        try:
+            final_state: PipelineState = await JOB_GRAPH.ainvoke(initial_state)
+            final_status = final_state.get("status", "FAILED")
+
+            if final_status in (JobStatus.APPLIED, JobStatus.APPLIED.value):
+                result.jobs_applied += 1
+            elif final_status in NEED_HUMAN_STATUSES or final_status in NEED_HUMAN_STATUS_VALUES:
+                result.jobs_flagged += 1
+            elif final_status in PRE_EXCLUDED_STATUSES or final_status in PRE_EXCLUDED_STATUS_VALUES:
+                result.jobs_skipped += 1
+            else:
+                result.jobs_failed += 1
+                _write_failed(job_id, run_log_id, final_state.get("error", "pipeline failed"))
+
+            status_str = (
+                final_status.value
+                if isinstance(final_status, JobStatus)
+                else str(final_status)
+            ).lower()
+            await emit_event(on_event, FlowEvent(
+                run_id=run_log_id, job_id=job_id, node="done",
+                status=status_str,
+                message=final_state.get("error", ""),
+            ))
+        except Exception as exc:
+            logger.error("Graph failed for job %d: %s", job_id, exc, exc_info=True)
+            result.jobs_failed += 1
+            result.errors.append(f"job {job_id}: {exc}")
+            _write_failed(job_id, run_log_id, str(exc))
+
+
+def _write_failed(job_id: int, run_id: int, reason: str) -> None:
+    with Session(engine) as session:
+        db_job = session.get(Job, job_id)
+        if db_job:
+            db_job.status = JobStatus.FAILED
+            db_job.fail_reason = reason[:300]
+            db_job.updated_at = datetime.now(timezone.utc)
+            session.add(db_job)
+            session.add(JobStageEvent(
+                job_id=job_id, run_id=run_id, stage="pipeline",
+                status=JobStatus.FAILED.value, message=db_job.fail_reason,
+            ))
+            session.commit()
+
+
+def finalize_run(run_log_id: int, result: RunResult, t0: float, log_prefix: str = "Run") -> None:
+    """Mark the RunLog COMPLETED with final counters. Shared by both flows."""
+    result.elapsed_seconds = round(time.monotonic() - t0, 2)
+    error_summary = "; ".join(result.errors[:3]) if result.errors else None
+    with Session(engine) as session:
+        run_log = session.get(RunLog, run_log_id)
+        if run_log:
+            run_log.status = RunStatus.COMPLETED
+            run_log.completed_at = datetime.now(timezone.utc)
+            run_log.jobs_scraped = result.jobs_scraped
+            run_log.jobs_applied = result.jobs_applied
+            run_log.jobs_failed = result.jobs_failed
+            run_log.jobs_flagged = result.jobs_flagged
+            run_log.jobs_skipped = result.jobs_skipped
+            run_log.error_message = error_summary
+            session.add(run_log)
+            session.commit()
+    logger.info(
+        "%s %d done in %.1fs — scraped=%d applied=%d failed=%d flagged=%d",
+        log_prefix, run_log_id, result.elapsed_seconds,
+        result.jobs_scraped, result.jobs_applied, result.jobs_failed, result.jobs_flagged,
+    )

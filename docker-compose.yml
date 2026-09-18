@@ -1,0 +1,64 @@
+# AutoApply AI — single-service modular monolith (per the architecture document).
+#
+#   docker compose up -d --build
+#   docker compose logs -f backend
+#
+# Requires a .env in this directory (copy .env.example). Secrets are passed
+# through env_file, never baked into the image.
+
+services:
+  backend:
+    build: .
+    image: autoapply-ai:latest
+    container_name: autoapply-backend
+    restart: unless-stopped
+
+    env_file: .env
+    environment:
+      # Inside the container these must point at the mounted volumes, so they
+      # are set here rather than left to .env, where host-relative paths would
+      # silently write into the container's ephemeral layer and vanish on
+      # restart (NFR-002: no data loss).
+      DATABASE_URL: sqlite:///data/autoapply.db
+      RESUMES_DIR: resumes
+      SCREENSHOTS_DIR: screenshots
+      LOG_DIR: logs
+      CHROMA_PERSIST_DIR: data/chroma
+      RESUME_TEMPLATE_PATH: templates/resume_template.tex
+      MASTER_PROFILE_PATH: master_profile.json
+
+    ports:
+      # Bound to loopback only. Publishing "8000:8000" would expose the API on
+      # every interface of the cloud instance — this app has no authentication,
+      # so anything reaching it can read scraped jobs and trigger runs.
+      # Reach it remotely with an SSH tunnel:
+      #     ssh -L 8000:127.0.0.1:8000 user@your-instance
+      - "127.0.0.1:8000:8000"
+
+    volumes:
+      # Persistent state. Everything else in the image is disposable.
+      - ./data:/app/data                  # SQLite database + Chroma Q&A cache
+      - ./resumes:/app/resumes            # generated PDFs + uploaded library
+      - ./screenshots:/app/screenshots    # apply-time captures for the human queue
+      - ./logs:/app/logs                  # rotating logs + saved portal sessions
+      # Edit the template or profile on the host and restart — no rebuild.
+      - ./templates:/app/templates:ro
+      - ./master_profile.json:/app/master_profile.json:ro
+
+    # Chromium allocates large shared-memory segments; the 64MB default causes
+    # renderer crashes that surface as random scrape failures.
+    shm_size: 1gb
+
+    # Guard rails for the Always Free tier's 4 ARM cores / 24GB (NFR-004).
+    # Playwright is the main consumer — PLAYWRIGHT_MAX_BROWSERS caps it further.
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+          cpus: "3.0"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

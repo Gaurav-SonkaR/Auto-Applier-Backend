@@ -1,0 +1,152 @@
+% ═══════════════════════════════════════════════════════════════════════════
+% AutoApply AI — master resume template  (FR-008)
+%
+% ATS rules this file obeys (SRS FR-008 "no tables, standard fonts"):
+%   * No tabular/tabularx/multicol anywhere — ATS parsers reorder table cells.
+%   * Standard Type-1 font (lmodern) only. No fontawesome, no custom glyphs.
+%   * Section headings are plain words an ATS recognises verbatim.
+%   * One column, at most two pages (see MAX_RESUME_PAGES in latex_compiler).
+%
+% STRUCTURE IS LOAD-BEARING. backend/app/services/resume_generator.py injects
+% LLM-tailored content by matching this file's exact shape. If you edit it,
+% keep all four contracts intact:
+%
+%   1. \section{Professional Summary} must be followed on the NEXT line by
+%      "{\small", then the summary text, then a line containing only "}".
+%   2. \section{Skills} has the same {\small ... } shape. Inside it, every line
+%      is one \noindent\textbf{Category:}\ ... row ending in \\ — except the
+%      last row, which has no trailing \\. Category names must stay exactly
+%      equal to SKILL_CATEGORIES in resume_generator.py.
+%   3. itemize blocks appear in this order and no others may precede them:
+%        block 0 -> experience job_0      block 3 -> project_1
+%        block 1 -> experience job_1      block 4 -> project_2
+%        block 2 -> project_0             block 5 -> project_3
+%      Education/Achievements therefore use plain text, never itemize.
+%   4. Names, employers, dates and the university are LOCKED_STRINGS — the LLM
+%      is forbidden from rewriting them and _validate_locked_fields enforces it.
+% ═══════════════════════════════════════════════════════════════════════════
+
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[top=0.45in,bottom=0.45in,left=0.55in,right=0.55in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+
+% Plain black rule under each heading — no colour, so the PDF stays legible
+% when an ATS strips styling and when it is printed in greyscale.
+\titleformat{\section}{\large\bfseries\scshape}{}{0em}{}[\vspace{-5pt}\rule{\linewidth}{0.6pt}\vspace{-2pt}]
+\titlespacing{\section}{0pt}{7pt}{4pt}
+
+\setlist[itemize]{leftmargin=1.15em,itemsep=1pt,parsep=0pt,topsep=2pt,label=\textbullet}
+
+\begin{document}
+
+% ── Header ────────────────────────────────────────────────────────────────
+% Centred plain text, not a table — ATS parsers read this top-down correctly.
+\begin{center}
+{\LARGE\bfseries Gaurav Sonkar}\\[3pt]
+{\small
++91-9131930576 \quad\textbar\quad
+\href{mailto:gauravsonkar.bhu@gmail.com}{gauravsonkar.bhu@gmail.com} \quad\textbar\quad
+\href{https://linkedin.com/in/gauravsonkar953bhu}{linkedin.com/in/gauravsonkar953bhu} \quad\textbar\quad
+\href{https://github.com/Gaurav-SonkaR}{github.com/Gaurav-SonkaR} \quad\textbar\quad
+India (Open to Relocation)
+}
+\end{center}
+\vspace{2pt}
+
+% ── Professional Summary ──  INJECTION POINT 1 (see contract 1 above)
+\section{Professional Summary}
+{\small
+Backend-focused Software Developer with production experience building Django REST and FastAPI services for a UK transport analytics platform. Ships containerised microservices on AWS, tunes PostgreSQL and MySQL for latency, and builds retrieval-augmented LLM systems with LangGraph and FAISS.
+}
+
+% ── Skills ──  INJECTION POINT 2 (see contract 2 above)
+% Row order is rewritten per job description; the most relevant category is
+% moved to the top. Category names must match SKILL_CATEGORIES exactly.
+\section{Skills}
+{\small
+\noindent\textbf{Languages:}\ Python, JavaScript (ES6+), TypeScript, SQL, Java, C/C++\\
+\noindent\textbf{Backend:}\ Django, Django REST Framework, FastAPI, Flask, REST API Design, Microservices, WSGI/ASGI\\
+\noindent\textbf{AI / GenAI:}\ LangChain, LangGraph, RAG Pipelines, FAISS, Chroma, LLM Agents, Prompt Engineering, Embeddings\\
+\noindent\textbf{Frontend:}\ React.js, Vue.js, HTML5, CSS3, Tailwind CSS, Bootstrap\\
+\noindent\textbf{Databases:}\ PostgreSQL, MySQL, MongoDB, Redis, Query Optimization, Indexing, CTEs, Window Functions\\
+\noindent\textbf{Cloud \& DevOps:}\ AWS, EC2, S3, RDS, Docker, CI/CD, Git, Linux, Ubuntu, SSH, Nginx\\
+\noindent\textbf{Automation:}\ Playwright, Selenium, BeautifulSoup, Scrapy, Pandas, openpyxl\\
+\noindent\textbf{ML / Data:}\ Scikit-learn, PyTorch, NumPy, Power BI, Matplotlib, Seaborn
+}
+
+% ── Experience ──  INJECTION POINTS 3a/3b (itemize blocks 0 and 1)
+\section{Experience}
+
+{\small\textbf{Software Developer} \textbar{} Divyal Technology Pvt. Ltd. \textbar{} Client: Tracsis PLC, UK \hfill Jun 2025 -- Present}
+\begin{itemize}
+  \item Designed and deployed 25+ production REST APIs using Django REST Framework for a UK transport analytics platform; served Vue.js web and Android mobile clients.
+  \item Reduced API response latency by 30\% via PostgreSQL/MySQL query tuning, composite indexing, and connection pool optimization on high-traffic endpoints.
+  \item Containerized microservices with Docker; deployed to AWS EC2 via SSH, eliminating environment drift and improving release efficiency by 40\% across dev/staging/prod.
+  \item Secured APIs with JWT authentication, RBAC, pagination, and global exception handling; automated CI/CD pipelines with structured Git branching and peer code reviews.
+  \item Developed Python automation scripts to eliminate repetitive manual tasks; supported AI-enabled backend data pipelines in an Agile Scrum environment.
+\end{itemize}
+
+\vspace{3pt}
+{\small\textbf{Software Developer Intern} \textbar{} Divyal Technology Pvt. Ltd. \textbar{} Client: Tracsis PLC, UK \hfill Feb 2025 -- May 2025}
+\begin{itemize}
+  \item Built Vue.js frontend components and Django REST APIs for a Passenger Management Dashboard; designed MySQL schemas, optimized queries, and supported AWS Linux deployments.
+  \item Promoted to full-time Software Developer within 4 months based on outstanding performance and consistent delivery.
+\end{itemize}
+
+% ── Projects ──  INJECTION POINTS 3c-3f (itemize blocks 2, 3, 4, 5)
+\section{Projects}
+
+{\small\textbf{AI Research Agentic System} \textbar{} LangGraph, LangChain, FAISS, Chroma, DeepSeek R1, FastAPI, Docker}
+\begin{itemize}
+  \item Architected a production-ready multi-agent LLM backend with LangGraph: document ingestion, semantic chunking, FAISS/Chroma vector indexing, and cited response generation.
+  \item Improved retrieval precision from 76\% to 92\% by tuning chunk size, overlap, and embedding model; evaluated via Precision@K and reduced hallucination through structured grounding.
+  \item Exposed via FastAPI async REST endpoints with Pydantic validation and Dockerized deployment on Linux.
+\end{itemize}
+
+\vspace{3pt}
+{\small\textbf{Enterprise E-Commerce Platform} \textbar{} React.js, Django REST, PostgreSQL, Redis, JWT, Docker, AWS EC2}
+\begin{itemize}
+  \item Full-stack application: React.js SPA frontend and Django REST Framework backend with JWT/OAuth2 auth, RBAC, product catalog, cart, and order management APIs.
+  \item Integrated Redis caching to cut DB round-trips by 60\%; deployed via Docker Compose on AWS EC2 and documented with Swagger/OpenAPI.
+\end{itemize}
+
+\vspace{3pt}
+{\small\textbf{Online Fraud Detection System} \textbar{} Scikit-learn, Random Forest, SMOTE, Django REST, Pandas, PostgreSQL}
+\begin{itemize}
+  \item Built an end-to-end ML pipeline on a 284K-row imbalanced dataset; SMOTE with Random Forest reached 99.96\% accuracy and 0.97 AUC-ROC, served as a real-time Django REST scoring API.
+\end{itemize}
+
+\vspace{3pt}
+{\small\textbf{Automated Web Scraping \& Report Generator} \textbar{} Python, Playwright, Selenium, BeautifulSoup, openpyxl, Pandas}
+\begin{itemize}
+  \item Automated dynamic web scraping into structured Excel reports; handled pagination, login flows, anti-bot measures, scheduled execution, data validation, and deduplication.
+\end{itemize}
+
+% ── Education ──  plain text on purpose: an itemize here would shift the
+% block indices that resume_generator.py relies on (contract 3).
+\section{Education}
+{\small
+\textbf{Master of Computer Application (MCA)} \textbar{} Banaras Hindu University (BHU), Varanasi \hfill Oct 2023 -- Jun 2025\\
+Relevant coursework: Machine Learning, DBMS, Operating Systems, Computer Networks, DSA, OOP, System Design.
+}
+
+% ── Achievements ──  plain text, same reason as Education.
+\section{Achievements}
+{\small
+Promoted from intern to full-time Software Developer at Divyal Technology within 4 months for exceptional delivery.\\
+Improved RAG retrieval precision by 16 percentage points (76\% to 92\%) in a production AI system.\\
+Power BI dashboard projected a 12\% revenue uplift across 10K+ sales records.\\
+Active on LeetCode, HackerRank and Coding Ninjas (DSA/SQL), and Kaggle (fraud detection, sales forecasting).
+}
+
+\end{document}
