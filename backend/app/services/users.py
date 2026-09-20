@@ -57,10 +57,6 @@ def get_by_username(session: Session, username: str) -> Optional[User]:
     return session.exec(select(User).where(User.username == username)).first()
 
 
-def user_count(session: Session) -> int:
-    return session.exec(select(func.count()).select_from(User)).one()
-
-
 def create_user(
     session: Session,
     username: str,

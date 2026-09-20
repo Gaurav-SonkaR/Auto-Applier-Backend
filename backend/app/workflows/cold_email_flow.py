@@ -18,7 +18,13 @@ from backend.app.services import profiles
 from backend.app.services.email_sender import DailyLimitReached, get_email_sender
 from backend.app.services.llm_client import LLMTask, get_llm_router
 from backend.app.services.resume_generator import generate_resume
-from backend.app.workflows.state import ColdEmailConfig, ColdEmailResult, EventCallback, FlowEvent
+from backend.app.workflows.state import (
+    ColdEmailConfig,
+    ColdEmailResult,
+    EventCallback,
+    FlowEvent,
+    emit_event as _emit,
+)
 from backend.app.workflows.types import ParsedJD
 
 logger = logging.getLogger("flow.cold_email")
@@ -341,10 +347,3 @@ async def _finalize_run(run_log_id: Optional[int], result: ColdEmailResult, t0: 
             session.add(run_log)
             session.commit()
 
-
-async def _emit(callback: Optional[EventCallback], event: FlowEvent) -> None:
-    if callback is not None:
-        try:
-            await callback(event)
-        except Exception as exc:
-            logger.debug("Event callback error: %s", exc)

@@ -33,15 +33,6 @@ def pdflatex_available() -> bool:
     return shutil.which("pdflatex") is not None
 
 
-def compile_resume_from_file(tex_path: str, output_path: str) -> str:
-    """Compile a .tex file to PDF. Returns the absolute path to the written PDF."""
-    source = Path(tex_path)
-    if not source.exists():
-        raise FileNotFoundError(f"LaTeX source not found: {tex_path}")
-    latex = source.read_text(encoding="utf-8")
-    return compile_resume_from_string(latex, output_path)
-
-
 def compile_resume_from_string(latex: str, output_path: str) -> str:
     """Compile a LaTeX string to PDF. Returns the absolute path to the written PDF."""
     out = Path(output_path)

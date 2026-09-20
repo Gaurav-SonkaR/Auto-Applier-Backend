@@ -14,7 +14,6 @@ os.environ["DATABASE_URL"] = f"sqlite:///{(_SCRATCH / 'test.db').as_posix()}"
 os.environ["LOG_DIR"] = str(_SCRATCH / "logs")
 os.environ["RESUMES_DIR"] = str(_SCRATCH / "resumes")
 os.environ["SCREENSHOTS_DIR"] = str(_SCRATCH / "screenshots")
-os.environ["CHROMA_PERSIST_DIR"] = str(_SCRATCH / "chroma")
 os.environ.setdefault("GROQ_API_KEY", "test-key-never-called")
 
 # ── Auth ─────────────────────────────────────────────────────────────────────

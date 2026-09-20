@@ -5,15 +5,6 @@ from dataclasses import dataclass
 
 
 @dataclass
-class FieldSelector:
-    """CSS/XPath locator + optional label used for matching questions."""
-    selector: str
-    label: str = ""
-    is_xpath: bool = False
-    optional: bool = False
-
-
-@dataclass
 class PortalSelectors:
     """All CSS/XPath selectors for a job portal."""
     # ── Search page ──────────────────────────────────────────────────────────
@@ -99,10 +90,6 @@ class PortalTemplate(ABC):
         loc = quote_plus(location)
         template = self.selectors.search_url_template
         return template.format(title=t, location=loc)
-
-    def is_easy_apply(self) -> bool:
-        """True if portal supports one-click apply (e.g. LinkedIn Easy Apply)."""
-        return bool(self.selectors.easy_apply_button)
 
     def requires_login(self) -> bool:
         return bool(self.selectors.login_email_input)

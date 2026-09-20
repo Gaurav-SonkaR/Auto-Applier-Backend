@@ -84,7 +84,7 @@ def _reconcile_stale_runs() -> None:
     """
     Mark any RunLog left RUNNING as FAILED at startup.
 
-    _active_tasks (backend/api/runs.py) is in-memory only — it's empty on every
+    _active_tasks (backend/app/routers/runs.py) is in-memory only — it's empty on every
     process start, so a run that was RUNNING when the previous process crashed,
     was killed, or was restarted has no task to resume and would otherwise stay
     RUNNING forever, permanently confusing the dashboard's active-run detection.

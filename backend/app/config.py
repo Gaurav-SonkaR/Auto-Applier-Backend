@@ -75,8 +75,6 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = Field(default="")
     screenshots_dir: str = Field(default="screenshots")
 
-    # ── Q&A Cache ─────────────────────────────────────────────────────────────
-
     # ── LLM Models ───────────────────────────────────────────────────────────
     groq_model_heavy: str = Field(default="llama-3.3-70b-versatile")
 

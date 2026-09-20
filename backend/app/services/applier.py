@@ -17,7 +17,7 @@ from sqlmodel import Session
 from backend.app.config import get_settings
 from backend.app.constants import is_external_ats
 from backend.app.database import get_session
-from backend.app.services.browser_pool import browser_semaphore
+from backend.app.services.browser_pool import browser_semaphore, random_human_delay as _human_delay
 from backend.app.models.application import Application, ApplicationStatus
 from backend.app.models.job import Job, JobStatus
 from backend.app.models.job_stage_event import JobStageEvent
@@ -45,21 +45,6 @@ from backend.app.services import profiles as profiles_service
 from backend.app.workflows.types import ApplyResult
 
 logger = logging.getLogger("agent.apply")
-
-# The candidate's name is interpolated per run. Hard-coding it meant every
-# account's form answers were written as one particular person.
-QA_LLM_SYSTEM_TEMPLATE = """\
-You are filling out a job application form on behalf of {candidate}.
-Answer the question truthfully from the profile below. If the profile does not
-say, answer with what it does support — never invent a fact about them.
-Keep answers concise — 1-2 sentences max for text, single values for dropdowns.
-Return ONLY the answer text, no explanation.
-"""
-
-
-def _qa_system_prompt(profile: dict) -> str:
-    name = str((profile.get("personal") or {}).get("name") or "").strip()
-    return QA_LLM_SYSTEM_TEMPLATE.format(candidate=name or "the candidate")
 
 CAPTCHA_SELECTORS = [
     "iframe[src*='recaptcha']",
@@ -838,9 +823,3 @@ async def _update_job(
             for session in sessions:
                 _do_update(session)
 
-
-
-
-async def _human_delay(settings) -> None:
-    ms = random.randint(settings.human_delay_min_ms, settings.human_delay_max_ms)
-    await asyncio.sleep(ms / 1000)

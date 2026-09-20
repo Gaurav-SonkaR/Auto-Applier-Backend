@@ -34,7 +34,7 @@ from backend.app.services.applier import MANUAL_APPLY_PORTAL, apply_to_job
 from backend.app.services.jd_parser import parse_jd
 from backend.app.services.resume_generator import generate_resume
 from backend.app.services import resume_library
-from backend.app.workflows.state import EventCallback, FlowEvent, PipelineState, RunResult
+from backend.app.workflows.state import EventCallback, FlowEvent, PipelineState, RunResult, emit_event
 from backend.app.workflows.types import ParsedJD
 
 logger = logging.getLogger("flow.run_loop")
@@ -371,14 +371,6 @@ def entry_state_for(job: Job) -> Optional[dict]:
         "error": "",
     }
     return base
-
-
-async def emit_event(callback: Optional[EventCallback], event: FlowEvent) -> None:
-    if callback is not None:
-        try:
-            await callback(event)
-        except Exception as exc:
-            logger.debug("Event callback error: %s", exc)
 
 
 # ── Shared per-job loop ────────────────────────────────────────────────────────

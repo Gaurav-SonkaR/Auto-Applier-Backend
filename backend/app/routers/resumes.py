@@ -15,6 +15,7 @@ from backend.app.models.job import Job
 from backend.app.models.resume import Resume
 from backend.app.models.user import User
 from backend.app.routers.auth import require_auth
+from backend.app.routers.jobs import _owned_job
 from backend.app.schemas.resume import (
     ResumeListResponse,
     ResumeMatchListResponse,
@@ -48,13 +49,6 @@ def _owned_resume(session: Session, resume_id: int, user: User) -> Resume:
     if resume is None or resume.user_id != user.user_id:
         raise HTTPException(status_code=404, detail=f"Resume {resume_id} not found")
     return resume
-
-
-def _owned_job(session: Session, job_id: int, user: User) -> Job:
-    job = session.get(Job, job_id)
-    if job is None or job.user_id != user.user_id:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-    return job
 
 
 def _to_response(resume: Resume) -> ResumeResponse:

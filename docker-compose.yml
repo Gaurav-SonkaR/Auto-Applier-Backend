@@ -23,7 +23,6 @@ services:
       RESUMES_DIR: resumes
       SCREENSHOTS_DIR: screenshots
       LOG_DIR: logs
-      CHROMA_PERSIST_DIR: data/chroma
       RESUME_TEMPLATE_PATH: templates/resume_template.tex
       MASTER_PROFILE_PATH: master_profile.json
 
@@ -37,7 +36,7 @@ services:
 
     volumes:
       # Persistent state. Everything else in the image is disposable.
-      - ./data:/app/data                  # SQLite database + Chroma Q&A cache
+      - ./data:/app/data                  # SQLite database + uploads
       - ./resumes:/app/resumes            # generated PDFs + uploaded library
       - ./screenshots:/app/screenshots    # apply-time captures for the human queue
       - ./logs:/app/logs                  # rotating logs + saved portal sessions

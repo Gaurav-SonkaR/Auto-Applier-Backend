@@ -125,3 +125,16 @@ class FlowEvent:
 
 # Type alias for the async event callback
 EventCallback = Callable[[FlowEvent], Coroutine[Any, Any, None]]
+
+import logging
+_event_logger = logging.getLogger("flow.state")
+
+
+async def emit_event(callback: Optional[EventCallback], event: FlowEvent) -> None:
+    """Safely dispatch an event callback, suppressing consumer errors."""
+    if callback is not None:
+        try:
+            await callback(event)
+        except Exception as exc:
+            _event_logger.debug("Event callback error: %s", exc)
+

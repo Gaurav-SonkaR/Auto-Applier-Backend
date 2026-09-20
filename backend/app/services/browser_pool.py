@@ -26,3 +26,12 @@ def browser_semaphore() -> asyncio.Semaphore:
         sem = asyncio.Semaphore(get_settings().playwright_max_browsers)
         _semaphores[id(loop)] = sem
     return sem
+
+
+async def random_human_delay(settings=None) -> None:
+    """Async sleep for a random interval within configured human delay bounds."""
+    import random
+    s = settings or get_settings()
+    ms = random.randint(s.human_delay_min_ms, s.human_delay_max_ms)
+    await asyncio.sleep(ms / 1000)
+

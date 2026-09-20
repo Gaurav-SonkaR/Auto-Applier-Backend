@@ -15,7 +15,7 @@ from sqlmodel import select
 from backend.app.config import get_settings
 from backend.app.database import get_session
 from backend.app.models.job import Job, JobStatus
-from backend.app.services.browser_pool import browser_semaphore
+from backend.app.services.browser_pool import browser_semaphore, random_human_delay as _human_delay
 from backend.app.services.portal_templates import get_template, PortalTemplate
 
 logger = logging.getLogger("agent.scraper")
@@ -351,8 +351,3 @@ def _resolve_url(href: str, base_url: str) -> str:
         return href
     return base_url.rstrip("/") + "/" + href.lstrip("/")
 
-
-
-async def _human_delay(settings) -> None:
-    ms = random.randint(settings.human_delay_min_ms, settings.human_delay_max_ms)
-    await asyncio.sleep(ms / 1000)
