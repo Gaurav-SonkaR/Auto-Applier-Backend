@@ -195,10 +195,6 @@ def create_app() -> FastAPI:
         allow_origins=[
             f"http://127.0.0.1:{settings.frontend_port}",
             f"http://localhost:{settings.frontend_port}",
-            # Local frontend (Vite dev server)
-            # f"http://127.0.0.1:{settings.frontend_port}",
-            # f"http://localhost:{settings.frontend_port}",
-            "https://auto-applier-ochre.vercel.app",
         ],
         allow_credentials=True,
         allow_methods=["*"],
