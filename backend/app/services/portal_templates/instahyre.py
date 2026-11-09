@@ -10,7 +10,7 @@ class InstahyreTemplate(PortalTemplate):
     NOTE: The CSS selectors below are best-effort starting points and MUST be
     verified against the live Instahyre DOM before relying on this portal in an
     unattended run — Instahyre renders much of its UI dynamically and the class
-    names change. Run one headed apply (PLAYWRIGHT_HEADLESS=false) and correct any
+    names change. Run one headed apply (SELENIUM_HEADLESS=false) and correct any
     selector that doesn't resolve. This same caveat applies to every portal
     template in this package.
     """

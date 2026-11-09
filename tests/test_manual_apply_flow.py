@@ -104,6 +104,7 @@ class TestManualStatusEndpoint:
         rows = session.exec(select(Application).where(Application.job_id == job_id)).all()
         assert len(rows) == 1
         assert rows[0].submitted_at is not None
+        assert rows[0].user_id == session.get(Job, job_id).user_id
 
     def test_applying_twice_does_not_duplicate_the_application(self, client, make_job, session):
         from sqlmodel import select
@@ -231,6 +232,182 @@ class TestApplierRefusesCareerSiteJobs:
         from backend.app.workflows.run_loop import MANUAL_APPLY_PORTAL as router
 
         assert guard is router
+
+
+class TestPipelineRecovery:
+    async def test_discovery_does_not_substitute_uploaded_resume_for_failed_tailoring(
+        self, make_job, session, admin_user, monkeypatch
+    ):
+        from backend.app.models.job import Job
+        from backend.app.workflows import run_loop
+
+        job_id = make_job(portal="web", status=JobStatus.PARSED)
+        monkeypatch.setattr(
+            run_loop, "generate_resume",
+            lambda *_args, **_kwargs: _raise_generation_failure(),
+        )
+        monkeypatch.setattr(
+            run_loop, "_best_uploaded_resume",
+            lambda *_args, **_kwargs: pytest.fail(
+                "Company Career Discovery must not substitute a library resume"
+            ),
+        )
+
+        result = await run_loop._resume_node({
+            "job_id": job_id,
+            "user_id": admin_user.user_id,
+            "portal": "web",
+            "parsed_jd": {},
+            "status": JobStatus.PARSED,
+        })
+
+        session.expire_all()
+        assert result["status"] == JobStatus.FAILED
+        assert "tailored resume generation failed" in result["error"].lower()
+        assert session.get(Job, job_id).resume_path is None
+
+    async def test_only_explicitly_retried_scraped_jobs_are_checkpoints(
+        self, make_job, admin_user, monkeypatch
+    ):
+        from backend.app.workflows import portal_apply_flow as flow
+        from backend.app.workflows.state import RunConfig
+
+        retried = make_job(status=JobStatus.SCRAPED, retry_count=1)
+        untouched = make_job(status=JobStatus.SCRAPED, retry_count=0)
+        parsed = make_job(status=JobStatus.PARSED)
+        processed = []
+
+        async def no_new_jobs(*_args, **_kwargs):
+            return []
+
+        async def record_jobs(job_ids, *_args, **_kwargs):
+            processed.extend(job_ids)
+
+        monkeypatch.setattr(flow, "scrape_jobs", no_new_jobs)
+        monkeypatch.setattr(flow, "run_job_graph_loop", record_jobs)
+
+        await flow.run_portal_apply(RunConfig(
+            portal="linkedin",
+            job_title="Software Engineer",
+            location="",
+            include_checkpointed=True,
+            user_id=admin_user.user_id,
+        ))
+
+        assert set(processed) == {retried, parsed}
+        assert untouched not in processed
+
+    async def test_daily_apply_limit_blocks_real_submit(self, make_job, session, monkeypatch):
+        from backend.app.config import get_settings
+        from backend.app.models.application import Application, ApplicationStatus
+        from backend.app.models.job import Job
+        from backend.app.workflows import run_loop
+
+        job_id = make_job(status=JobStatus.RESUME_READY)
+        job = session.get(Job, job_id)
+        session.add(Application(
+            # Pre-owner application rows have NULL user_id; the cap must still
+            # count them through the owning job relationship.
+            user_id=None,
+            job_id=job_id,
+            status=ApplicationStatus.SUBMITTED,
+        ))
+        session.commit()
+        monkeypatch.setattr(get_settings(), "daily_apply_limit", 1, raising=False)
+
+        async def should_not_apply(*_args, **_kwargs):
+            raise AssertionError("daily application limit was bypassed")
+
+        monkeypatch.setattr(run_loop, "apply_to_job", should_not_apply)
+        result = await run_loop._apply_node({
+            "job_id": job_id,
+            "resume_path": "/tmp/resume.pdf",
+            "dry_run": False,
+        })
+
+        assert result["status"] == JobStatus.SKIPPED
+        assert "daily application limit" in result["error"].lower()
+
+    async def test_dry_run_does_not_consume_or_enforce_application_limit(
+        self, make_job, session, monkeypatch
+    ):
+        from backend.app.config import get_settings
+        from backend.app.models.application import Application, ApplicationStatus
+        from backend.app.models.job import Job
+        from backend.app.services import applier
+        from backend.app.workflows import run_loop
+
+        job_id = make_job(status=JobStatus.RESUME_READY)
+        job = session.get(Job, job_id)
+        session.add(Application(
+            user_id=job.user_id, job_id=job_id, status=ApplicationStatus.SUBMITTED
+        ))
+        session.commit()
+        monkeypatch.setattr(get_settings(), "daily_apply_limit", 1, raising=False)
+
+        async def rehearsal(*_args, **_kwargs):
+            return applier.ApplyResult(
+                job_id=job_id,
+                status=JobStatus.NEED_HUMAN_ACTION,
+                reason="Rehearsal: test",
+            )
+
+        monkeypatch.setattr(run_loop, "apply_to_job", rehearsal)
+        result = await run_loop._apply_node({
+            "job_id": job_id,
+            "resume_path": "/tmp/resume.pdf",
+            "dry_run": True,
+        })
+
+        assert result["status"] == JobStatus.NEED_HUMAN_ACTION
+
+
+def _raise_generation_failure():
+    raise RuntimeError("simulated resume generation failure")
+
+
+class TestDiscoveryJDQuality:
+    def test_navigation_shell_is_too_short_to_be_a_job_description(self):
+        from backend.app.workflows.run_loop import _usable_discovery_jd
+
+        assert not _usable_discovery_jd("Skip to main content\n-")
+        assert _usable_discovery_jd("Responsibilities and requirements " * 10)
+
+    async def test_short_cached_discovery_jd_fails_before_parsing(self):
+        from backend.app.workflows.run_loop import _fetch_jd_node
+
+        result = await _fetch_jd_node({
+            "job_id": 1,
+            "portal": "web",
+            "jd_text": "Skip to main content\n-",
+            "status": JobStatus.SCRAPED,
+        })
+
+        assert result["status"] == JobStatus.FAILED
+        assert "too little JD text" in result["error"]
+
+    async def test_discovery_jd_without_fit_signals_does_not_advance(
+        self, monkeypatch
+    ):
+        from backend.app.workflows import run_loop
+        from backend.app.workflows.types import ParsedJD
+
+        async def no_signals(*_args, **_kwargs):
+            return ParsedJD(raw={
+                "required_skills": [], "nice_to_have": [], "keywords": [],
+                "experience_years": None,
+            })
+
+        monkeypatch.setattr(run_loop, "parse_jd", no_signals)
+        result = await run_loop._parse_node({
+            "job_id": 1,
+            "portal": "web",
+            "jd_text": "A sufficiently long but unstructured job description " * 10,
+            "status": JobStatus.SCRAPED,
+        })
+
+        assert result["status"] == JobStatus.FAILED
+        assert "not treated as a match" in result["error"]
 
 
 class TestWebTemplateCarriesNoApplySelectors:

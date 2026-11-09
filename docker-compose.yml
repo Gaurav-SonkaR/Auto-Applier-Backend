@@ -49,7 +49,7 @@ services:
     shm_size: 1gb
 
     # Guard rails for the Always Free tier's 4 ARM cores / 24GB (NFR-004).
-    # Playwright is the main consumer — PLAYWRIGHT_MAX_BROWSERS caps it further.
+    # Selenium's shared browser pool is capped by SELENIUM_MAX_DRIVERS.
     deploy:
       resources:
         limits:

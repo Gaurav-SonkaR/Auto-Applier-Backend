@@ -52,6 +52,17 @@ class TestCandidateYears:
         """Zero would skip every job with a requirement. Unknown skips none."""
         assert candidate_years({"experience": [{"title": "Dev"}]}, TODAY) is None
 
+    def test_employment_gaps_are_not_counted_as_experience(self):
+        profile = {"experience": [
+            {"start_date": "Jan 2020", "end_date": "Dec 2020"},
+            {"start_date": "Jan 2025", "end_date": "Dec 2025"},
+        ]}
+        assert candidate_years(profile, TODAY) == 1.8
+
+    def test_missing_end_date_is_not_assumed_to_mean_present(self):
+        profile = {"experience": [{"start_date": "Jan 2020"}]}
+        assert candidate_years(profile, TODAY) is None
+
     @pytest.mark.parametrize("end", ["Present", "present", "Current", "Till date"])
     def test_ongoing_roles_run_to_today(self, end):
         profile = {"experience": [{"start_date": "Sep 2025", "end_date": end}]}
@@ -64,21 +75,30 @@ class TestExperienceRule:
     def test_a_senior_role_is_skipped(self):
         result = fit({"experience_years": 8, "required_skills": ["Python"]})
         assert not result.fits
-        assert "8+ years" in result.summary()
+        assert "8 years" in result.summary()
 
     def test_a_matching_role_goes_ahead(self):
-        assert fit({"experience_years": 2, "required_skills": ["Python"]}).fits
+        assert fit({"experience_years": 1.6, "required_skills": ["Python"]}).fits
 
-    def test_the_tolerance_allows_a_stretch(self):
-        """Postings overstate — "2+ years" routinely hires at 1.6."""
-        assert fit({"experience_years": 2}, experience_tolerance_years=1.0).fits
-        assert not fit({"experience_years": 2}, experience_tolerance_years=0.0).fits
+    def test_experience_gate_is_strict_by_default(self):
+        profile = {
+            "preferences": {"total_experience_years": "1"},
+            "primary_skills": ["Python"],
+        }
+        assert fit({"experience_years": 1}, profile=profile).fits
+        assert not fit({"experience_years": 2}, profile=profile).fits
 
     def test_no_stated_requirement_is_not_a_reason_to_skip(self):
         assert fit({"experience_years": None, "required_skills": ["Python"]}).fits
 
-    def test_an_unknown_candidate_history_is_not_a_reason_to_skip(self):
-        assert fit({"experience_years": 8}, profile={"primary_skills": ["Python"]}).fits
+    def test_unknown_candidate_experience_does_not_pass_a_positive_minimum(self):
+        result = fit({"experience_years": 1, "required_skills": ["Python"]},
+                     profile={"primary_skills": ["Python"]})
+        assert not result.fits
+        assert "experience is unknown" in result.summary()
+
+    def test_unknown_candidate_experience_can_match_a_zero_minimum(self):
+        assert fit({"experience_years": 0}, profile={"primary_skills": ["Python"]}).fits
 
     @pytest.mark.parametrize("junk", ["", "several", None, "N/A"])
     def test_a_malformed_requirement_is_ignored(self, junk):
@@ -185,7 +205,7 @@ class TestPipelinePlacement:
             select(JobStageEvent).where(JobStageEvent.job_id == job_id,
                                         JobStageEvent.stage == "fit")
         ).first()
-        assert event and "9+ years" in event.message
+        assert event and "9 years" in event.message
 
     async def test_the_node_lets_a_fitting_job_through_untouched(
         self, make_job, session, admin_user
@@ -201,7 +221,7 @@ class TestPipelinePlacement:
 
         out = await _fit_node({
             "job_id": job_id, "status": "PARSED",
-            "parsed_jd": {"experience_years": 2, "required_skills": ["Python"]},
+            "parsed_jd": {"experience_years": 1.6, "required_skills": ["Python"]},
         })
         assert out["status"] == "PARSED"
         session.expire_all()

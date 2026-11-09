@@ -1,7 +1,7 @@
 """Phase 5: profile-driven form autofill, now wired into the applier.
 
 The matching and gate-detection logic is pure, so it is tested directly without
-a browser. `autofill_form` (the Playwright wrapper) is exercised against a
+a browser. `autofill_form` (the Selenium adapter) is exercised against a
 minimal fake page.
 """
 import pytest
@@ -167,20 +167,35 @@ class FakeElement:
     async def fill(self, value):
         self.filled = value
 
+    async def is_visible(self):
+        return True
+
+    async def input_value(self):
+        return self.filled or ""
+
+    async def execute_script(self, _script, *_args):
+        return ""
+
 
 class FakePage:
     def __init__(self, elements, body_text=""):
         self._elements = elements
         self._body = body_text
 
-    async def query_selector_all(self, _selector):
+    async def find_all(self, _selector):
         return self._elements
 
-    async def query_selector(self, _selector):
+    async def find(self, _selector):
         return None
 
-    async def inner_text(self, _selector):
+    async def text(self, _selector="body"):
         return self._body
+
+    async def execute_script(self, _script, *_args):
+        return []
+
+    async def check(self, _selector):
+        pass
 
 
 class TestAutofillForm:

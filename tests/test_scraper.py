@@ -3,7 +3,7 @@ portal's own profile and scrape its recommended-jobs listing, falling back to
 keyword search when a portal doesn't support it or the automation fails.
 
 Fakes here are hand-rolled (matching the FakeElement/FakePage style in
-test_form_autofill.py) rather than mocking Playwright's Page — the actual
+test_form_autofill.py) rather than requiring a live Selenium driver — the actual
 browser-driving code (page.goto navigating a real site, real DOM selectors
 resolving) is not testable without a live browser and live portals; see the
 portal template docstrings for that caveat. What's covered here is everything
@@ -96,11 +96,16 @@ class TestLoginCredentialResolution:
     ):
         from backend.app.services.scraper import _login
 
-        page = FakePage()
-        await _login(page, get_template(portal), fake_settings, portal)
+        template = get_template(portal)
+        page = FakePage(elements={
+            template.selectors.login_email_input: FakeElement(),
+            template.selectors.login_password_input: FakeElement(),
+            template.selectors.login_submit_button: FakeElement(),
+        })
+        await _login(page, template, fake_settings, portal)
 
-        assert page.filled.get(get_template(portal).selectors.login_password_input) == expected_password
-        assert page.filled.get(get_template(portal).selectors.login_email_input) == "user@gmail.com"
+        assert page.filled.get(template.selectors.login_password_input) == expected_password
+        assert page.filled.get(template.selectors.login_email_input) == "user@gmail.com"
 
     async def test_skips_login_when_password_blank(self, fake_settings):
         from backend.app.services.scraper import _login
@@ -120,29 +125,59 @@ class FakeElement:
         self._text = text
         self.enabled = enabled
         self.clicked = False
+        self.filled = None
+        self.uploaded_path = None
+        self.visible = True
+        self._fill_callback = None
+        self._click_callback = None
 
     async def get_attribute(self, name):
         return self._href if name == "href" else None
 
-    async def inner_text(self):
+    async def text(self):
         return self._text
 
     async def is_enabled(self):
         return self.enabled
 
+    async def is_visible(self):
+        return self.visible
+
     async def click(self):
         self.clicked = True
+        if self._click_callback:
+            self._click_callback()
 
-    async def set_input_files(self, path):
+    async def fill(self, value):
+        self.filled = value
+        if self._fill_callback:
+            self._fill_callback(value)
+
+    async def set_file(self, path):
         self.uploaded_path = path
+
+    async def input_value(self):
+        return self.filled or ""
+
+    async def tag_name(self):
+        return "input"
+
+    async def select(self, value):
+        self.selected_value = value
+
+    async def check(self):
+        self.checked = True
+
+    async def execute_script(self, _script, *_args):
+        return ""
 
 
 class FakeCard:
-    """A job-listing card: query_selector returns the link or title element."""
+    """A job-listing card: find returns the link or title element."""
     def __init__(self, href, title=None):
         self._children = {"link": FakeElement(href=href), "title": FakeElement(text=title or "")}
 
-    async def query_selector(self, selector):
+    async def find(self, selector):
         # The test selectors below use these literal marker strings so the
         # fake doesn't need to parse real CSS.
         if selector == "a.link":
@@ -153,7 +188,7 @@ class FakeCard:
 
 
 class FakePage:
-    """Enough of Playwright's Page surface for _collect_job_urls, _login and
+    """Enough of the Selenium async page facade for _collect_job_urls, _login and
     _upload_resume_to_profile to run against, with no real browser."""
 
     def __init__(self, cards=None, elements=None, next_button=None):
@@ -165,32 +200,32 @@ class FakePage:
         self.visited: list[str] = []
         self.uploaded: dict[str, str] = {}
 
-    async def goto(self, url, **_kwargs):
+        for selector, element in self._elements.items():
+            element._fill_callback = lambda value, key=selector: self.filled.__setitem__(key, value)
+            element._click_callback = lambda key=selector: self.clicked.append(key)
+
+    async def navigate(self, url, **_kwargs):
         self.visited.append(url)
 
-    async def wait_for_load_state(self, *_a, **_kw):
+    async def wait_ready(self, *_a, **_kw):
         pass
 
-    async def wait_for_selector(self, selector, timeout=3_000):
-        if selector in self._elements:
-            return self._elements[selector]
-        raise TimeoutError(f"not found: {selector}")
+    async def wait_for(self, selector, timeout=3_000, visible=False):
+        element = await self.find(selector)
+        return element if element and (not visible or element.visible) else None
 
-    async def query_selector_all(self, selector):
+    async def find_all(self, selector):
         if selector == "div.card":
             return self._cards
         return []
 
-    async def query_selector(self, selector):
+    async def find(self, selector):
         if selector == "button.next":
             return self._next_button
         return self._elements.get(selector)
 
-    async def fill(self, selector, value):
-        self.filled[selector] = value
-
-    async def click(self, selector):
-        self.clicked.append(selector)
+    async def handle_cookie_consent(self):
+        return False
 
 
 # ── _collect_job_urls ────────────────────────────────────────────────────────
@@ -322,7 +357,7 @@ class TestScrapeRecommendedPage:
 class TestScrapeRecommendedJobsEarlyReturn:
     async def test_unsupported_portal_returns_empty_without_launching_a_browser(self):
         """LinkedIn has no resume-driven config — this must short-circuit
-        before ever calling async_playwright(), so it's safe to run with no
+        before ever creating a WebDriver, so it's safe to run with no
         browser installed at all."""
         from backend.app.services.scraper import scrape_recommended_jobs
 

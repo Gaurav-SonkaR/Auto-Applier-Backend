@@ -139,7 +139,7 @@ def _configure_logging(level: str, log_dir: str) -> None:
                 "encoding": "utf-8",
                 "level": "ERROR",
             },
-            # scraper.log — Playwright agent events (agent.scraper + agent.apply)
+            # scraper.log — browser agent events (agent.scraper + agent.apply)
             "file_scraper": {
                 "class": "logging.FileHandler",
                 "filename": f"{log_dir}/scraper.log",

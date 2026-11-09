@@ -76,7 +76,7 @@ def upload(client, clean_library, minimal_pdf):
 class TestRunPortalApplyResumeDrivenFallback:
     """`monkeypatch` replaces the two scrape functions portal_apply_flow
     actually calls, so these test the DECISION LOGIC — which one gets tried,
-    and in what order — without touching Playwright or a real portal."""
+    and in what order — without touching Selenium or a real portal."""
 
     @pytest.fixture(autouse=True)
     def _clean_runs(self, session):

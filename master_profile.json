@@ -3,132 +3,385 @@
     "name": "Gaurav Sonkar",
     "email": "gauravsonkar.bhu@gmail.com",
     "phone": "+91-9131930576",
-    "linkedin": "linkedin.com/in/gauravsonkar953bhu",
-    "github": "github.com/Gaurav-SonkaR",
-    "kaggle": "kaggle.com/gauravsonkarbhu2025",
-    "location": "India (Open to Relocation)"
+    "location": "Rajnandgaon, CG, India (home); currently based in Bhilai, CG for work; open to relocation.",
+    "linkedin": "https://linkedin.com/in/gauravsonkar953bhu",
+    "github": "https://github.com/Gaurav-SonkaR",
+    "kaggle": "https://kaggle.com/gauravsonkarbhu2025",
+    "resume_url": ""
+  },
+  "preferences": {
+    "total_experience_years": "",
+    "willing_to_relocate": "Yes",
+    "preferred_locations": [],
+    "notice_period": "",
+    "current_ctc": "",
+    "expected_ctc": "",
+    "needs_visa_sponsorship": ""
   },
   "primary_skills": [
-    "Python", "JavaScript (ES6+)", "TypeScript", "SQL", "Java", "C/C++",
-    "Django", "Django REST Framework", "FastAPI", "Flask",
-    "REST API Design", "Microservices", "WSGI/ASGI",
-    "LangChain", "LangGraph", "RAG Pipelines", "FAISS", "Chroma",
-    "LLM Agents", "Prompt Engineering", "Embeddings",
-    "React.js", "Vue.js", "HTML5", "CSS3", "Tailwind CSS", "Bootstrap",
-    "PostgreSQL", "MySQL", "MongoDB", "Redis",
-    "Query Optimization", "Indexing", "CTEs", "Window Functions",
-    "AWS", "EC2", "S3", "RDS", "Docker", "CI/CD", "Git",
-    "Linux", "Ubuntu", "SSH", "Nginx",
-    "Playwright", "Selenium", "BeautifulSoup", "Scrapy", "Pandas", "openpyxl",
-    "Scikit-learn", "PyTorch", "NumPy", "Power BI", "Matplotlib", "Seaborn"
+    "Python",
+    "FastAPI",
+    "Django",
+    "Django REST Framework",
+    "REST APIs",
+    "React.js",
+    "TypeScript",
+    "JavaScript",
+    "LangGraph",
+    "LangChain",
+    "Playwright",
+    "SQL",
+    "MySQL",
+    "SQLite",
+    "AWS",
+    "Docker",
+    "System Design",
+    "API Architecture"
   ],
   "secondary_skills": [
-    "Spring Boot", "Kubernetes", "Terraform", "GraphQL",
-    "Elasticsearch", "Kafka", "gRPC"
+    "Vue.js",
+    "Flask",
+    "PostgreSQL",
+    "MongoDB",
+    "Redis",
+    "Elasticsearch",
+    "ChromaDB",
+    "Ollama",
+    "Hugging Face",
+    "RAG",
+    "FAISS",
+    "LLM Agents",
+    "Prompt Engineering",
+    "Machine Learning",
+    "NLP",
+    "Scikit-learn",
+    "Pandas",
+    "NumPy",
+    "Power BI",
+    "Matplotlib",
+    "Seaborn",
+    "Selenium",
+    "BeautifulSoup",
+    "Scrapy",
+    "openpyxl",
+    "HTML5",
+    "CSS3",
+    "Tailwind CSS",
+    "Bootstrap",
+    "Git",
+    "Linux",
+    "Nginx",
+    "Kubernetes",
+    "CI/CD",
+    "Razorpay",
+    "ColdFusion",
+    "C/C++",
+    "Java",
+    "Spring Boot (foundational knowledge)"
   ],
   "experience": [
     {
+      "title": "Freelance Software Engineer (Team Lead)",
+      "company": "Early-stage Startup",
+      "client": "",
+      "location": "",
+      "start_date": "May 2026",
+      "end_date": "August 2026",
+      "tech_stack": [
+        "React.js",
+        "JavaScript",
+        "Python",
+        "Django",
+        "Django REST Framework",
+        "MySQL",
+        "AWS",
+        "Razorpay",
+        "Git",
+        "CI/CD"
+      ],
+      "bullets": [
+        "Led end-to-end technical development of a multi-tenant inventory management platform for an early-stage startup.",
+        "Designed system architecture, relational database schema, and business workflows for inventory, products, customers, orders, users, and payments.",
+        "Built REST APIs using Django REST Framework and integrated them with a React.js frontend.",
+        "Integrated Razorpay Payment Gateway for secure payment processing and transaction verification.",
+        "Deployed the application on AWS and configured production infrastructure, DNS, and environment settings.",
+        "Designed and implemented CI/CD pipelines to automate application deployment and release workflows.",
+        "Worked with startup founders to gather business requirements and translate them into technical solutions.",
+        "Coordinated implementation, assigned development tasks, and maintained engineering standards throughout the project lifecycle."
+      ]
+    },
+    {
       "title": "Software Developer",
       "company": "Divyal Technology Pvt. Ltd.",
-      "client": "Tracsis PLC, UK",
-      "location": "Bhilai, CG",
+      "client": "Tracsis PLC (UK)",
+      "location": "Bhilai, Chhattisgarh",
       "start_date": "Jun 2025",
       "end_date": "Present",
       "bullets": [
-        "Designed and deployed 25+ production REST APIs using Django REST Framework for a UK transport analytics platform; served Vue.js web and Android mobile clients.",
-        "Reduced API response latency by 30% via PostgreSQL/MySQL query tuning, composite indexing, and connection pool optimization on high-traffic endpoints.",
-        "Containerized microservices with Docker; deployed to AWS EC2 via SSH — eliminated environment drift and improved release efficiency by 40% across dev/staging/prod.",
-        "Secured APIs with JWT authentication, RBAC, pagination, and global exception handling; automated CI/CD pipelines with structured Git branching and peer code reviews.",
-        "Developed Python automation scripts to eliminate repetitive manual tasks; supported AI-enabled backend data pipelines in an Agile Scrum environment."
+        "Maintain and enhance production-grade UK railway web applications and backend services.",
+        "Develop and maintain REST APIs using Django REST Framework and FastAPI.",
+        "Build backend modules, optimize SQL queries, and resolve production issues.",
+        "Enhance enterprise applications using ColdFusion and Vue.js.",
+        "Automate engineering workflows using Python scripts.",
+        "Containerize services using Docker and support deployments on AWS EC2."
       ]
     },
     {
       "title": "Software Developer Intern",
       "company": "Divyal Technology Pvt. Ltd.",
-      "client": "Tracsis PLC, UK",
-      "location": "Bhilai, CG",
+      "client": "",
+      "location": "Bhilai, Chhattisgarh",
       "start_date": "Feb 2025",
       "end_date": "May 2025",
+      "tech_stack": [
+        "Vue.js",
+        "Django REST Framework",
+        "MySQL"
+      ],
       "bullets": [
-        "Built Vue.js frontend components and Django REST APIs for Passenger Management Dashboard; designed MySQL schemas, optimized queries, and supported AWS Linux deployments.",
-        "Promoted to full-time Software Developer within 4 months based on outstanding performance and consistent delivery."
+        "Developed Vue.js components and Django REST APIs for the Passenger Management Dashboard.",
+        "Designed MySQL database schemas and implemented backend business logic.",
+        "Collaborated with senior engineers in Agile sprints and contributed production-ready features.",
+        "Converted to a full-time Software Developer based on performance."
       ]
     }
   ],
   "projects": [
     {
-      "name": "AI Research Agentic System",
-      "tech_stack": ["LangGraph", "LangChain", "FAISS", "Chroma", "DeepSeek R1", "FastAPI", "Docker"],
+      "name": "AutoApply AI – Autonomous AI Job Application Platform",
+      "tech_stack": [
+        "Python",
+        "FastAPI",
+        "React",
+        "TypeScript",
+        "LangGraph",
+        "Playwright",
+        "Groq API",
+        "Ollama",
+        "ChromaDB",
+        "SQLite",
+        "WebSockets",
+        "Docker",
+        "LaTeX"
+      ],
       "bullets": [
-        "Architected production-ready multi-agent LLM backend with LangGraph: document ingestion, semantic chunking, FAISS/Chroma vector indexing, and structured response generation with citation validation.",
-        "Improved retrieval precision 76% to 92% by optimizing chunk size, overlap, and embedding model selection; evaluated via Precision@K; reduced hallucination via prompt engineering and structured grounding.",
-        "Exposed via FastAPI async REST endpoints with Pydantic validation and Dockerized deployment on Linux."
+        "Built a local-first job application platform with FastAPI, React, LangGraph, and Playwright for job discovery, tailored resumes, and application workflows.",
+        "Designed multi-agent workflows for job scraping, description parsing, resume optimization, browser automation, and recruiter outreach.",
+        "Built an LLM routing layer for Groq, Ollama, and Hugging Face with provider failover.",
+        "Developed ATS-focused LaTeX resume generation and automated application workflows with form validation, screenshots, CAPTCHA detection, and external ATS handling.",
+        "Implemented a ChromaDB semantic Q&A cache and a WebSocket-enabled dashboard for live workflow monitoring.",
+        "Designed FastAPI APIs, SQLite persistence, configurable services, and environment-based credential management."
+      ]
+    },
+    {
+      "name": "AI Research Agentic System – Multi-Agent Research & Summarization Platform",
+      "tech_stack": [
+        "Python",
+        "LangGraph",
+        "LangChain",
+        "Tavily API",
+        "DeepSeek R1",
+        "OpenRouter"
+      ],
+      "bullets": [
+        "Built a LangGraph multi-agent system for web research, analysis, validation, and human-in-the-loop refinement.",
+        "Developed specialized agents for information retrieval, summarization, quality validation, and iterative feedback.",
+        "Integrated Tavily Search API for targeted research across government and trusted economic domains.",
+        "Built structured report generation using DeepSeek R1 through OpenRouter.",
+        "Implemented stateful workflow management to preserve context and track multi-step execution.",
+        "Added human review and configurable iteration limits, domain filters, and context-aware reporting.",
+        "Reported 89% ROUGE-L summarization accuracy."
       ]
     },
     {
       "name": "Enterprise E-Commerce Platform",
-      "tech_stack": ["React.js", "Django REST", "PostgreSQL", "Redis", "JWT", "Docker", "AWS EC2"],
+      "tech_stack": [
+        "Vue.js",
+        "Django REST Framework",
+        "Python",
+        "PostgreSQL",
+        "SQLite",
+        "Elasticsearch",
+        "Redis",
+        "Docker",
+        "AWS EC2",
+        "Razorpay"
+      ],
       "bullets": [
-        "Full-stack application: React.js SPA frontend and Django REST Framework backend with JWT/OAuth2 auth, RBAC, product catalog, cart, and order management APIs.",
-        "Integrated Redis caching — reduced DB round-trips by 60%; deployed via Docker Compose on AWS EC2; documented with Swagger/OpenAPI."
+        "Built a decoupled Vue.js and Django REST Framework platform with APIs for products, carts, orders, and authentication.",
+        "Implemented JWT authentication and role-based access control for customer and administrative workflows.",
+        "Integrated Elasticsearch product search and an ML-powered product recommendation system.",
+        "Used Redis caching to reduce database round-trips by 60%.",
+        "Integrated Razorpay payments and automated order processing.",
+        "Containerized and deployed the application on AWS EC2 with environment-based configuration and Swagger/OpenAPI documentation."
       ]
     },
     {
       "name": "Online Fraud Detection System",
-      "tech_stack": ["Scikit-learn", "Random Forest", "SMOTE", "Django REST", "Pandas", "PostgreSQL"],
+      "tech_stack": [
+        "Python",
+        "Scikit-learn",
+        "Pandas",
+        "NumPy",
+        "Django",
+        "Django REST Framework"
+      ],
       "bullets": [
-        "End-to-end ML pipeline on 284K-row imbalanced dataset; SMOTE + Random Forest achieved 99.96% accuracy and 0.97 AUC-ROC; deployed real-time inference REST API via Django REST for live transaction scoring."
+        "Built a Random Forest fraud classifier for a dataset of more than 284,000 imbalanced transaction records.",
+        "Applied preprocessing, feature engineering, and SMOTE oversampling to address class imbalance.",
+        "Reported 99.96% classification accuracy and 0.97 AUC-ROC on unseen data.",
+        "Deployed the model as a Django REST API for transaction prediction.",
+        "Implemented an end-to-end workflow for preprocessing, training, evaluation, serialization, and inference."
       ]
     },
     {
-      "name": "Automated Web Scraping & Report Generator",
-      "tech_stack": ["Python", "Playwright", "Selenium", "BeautifulSoup", "openpyxl", "Pandas"],
+      "name": "Legal-ABS – Transformer-based Legal Document Summarization",
+      "tech_stack": [
+        "Python",
+        "Hugging Face Transformers",
+        "BART",
+        "PyTorch",
+        "Pandas",
+        "Kaggle"
+      ],
       "bullets": [
-        "Automated pipeline for dynamic web scraping and structured Excel report generation; handled pagination, login flows, anti-bot measures, scheduled execution, data validation, and deduplication."
+        "Implemented and extended a research methodology for legal document summarization using BART.",
+        "Fine-tuned the BART model through hyperparameter optimization.",
+        "Built an NLP workflow for preprocessing, tokenization, model training, inference, and evaluation.",
+        "Evaluated generated summaries using ROUGE metrics across hyperparameter configurations."
+      ]
+    },
+    {
+      "name": "Multilingual FAQ Management System",
+      "tech_stack": [
+        "Django",
+        "Django REST Framework",
+        "Redis",
+        "SQLite",
+        "Google Translate API",
+        "CKEditor",
+        "Pytest"
+      ],
+      "bullets": [
+        "Built a multilingual FAQ management system with REST APIs and an administrative dashboard.",
+        "Integrated Google Translate API for English, Hindi, Bengali, and other localized content.",
+        "Implemented Redis caching and language-based API queries.",
+        "Integrated CKEditor and automated tests with Pytest."
+      ]
+    },
+    {
+      "name": "Reversible Data Hiding in Encrypted Images (Research Implementation)",
+      "tech_stack": [
+        "Python",
+        "OpenCV",
+        "NumPy",
+        "Image Processing"
+      ],
+      "bullets": [
+        "Implemented median prediction and bit-plane cycling-XOR algorithms for reversible data hiding in encrypted images.",
+        "Built an image-processing workflow for bit-plane decomposition, prediction, encryption, data embedding, extraction, and lossless reconstruction.",
+        "Validated exact recovery of original images using Python, NumPy, and OpenCV."
+      ]
+    },
+    {
+      "name": "Pizza Sales Analytics Dashboard",
+      "tech_stack": [
+        "SQL",
+        "MySQL",
+        "CSV",
+        "Data Analysis"
+      ],
+      "bullets": [
+        "Analyzed customer orders, revenue, and product performance using SQL.",
+        "Used joins, CTEs, aggregates, subqueries, and window functions to examine sales trends.",
+        "Reported revenue, order volume, average order value, product performance, and peak business hours.",
+        "Produced insights to support inventory planning, pricing, and sales decisions."
+      ]
+    },
+    {
+      "name": "Diwali Sales Analysis",
+      "tech_stack": [
+        "Python",
+        "Pandas",
+        "NumPy",
+        "Matplotlib",
+        "Seaborn",
+        "Jupyter Notebook"
+      ],
+      "bullets": [
+        "Performed exploratory analysis of Diwali sales data using Pandas and NumPy.",
+        "Cleaned and transformed transaction data, handled missing values, and performed feature engineering.",
+        "Visualized customer demographics, product categories, regional sales, and purchasing patterns.",
+        "Documented a reproducible analysis workflow in Jupyter Notebook."
       ]
     }
   ],
   "education": {
-    "degree": "Master of Computer Application (MCA)",
-    "institution": "Banaras Hindu University (BHU), Varanasi",
+    "degree": "MCA, Computer Applications",
+    "institution": "Banaras Hindu University, Varanasi",
     "start_date": "Oct 2023",
     "end_date": "Jun 2025",
     "relevant_courses": [
-      "Machine Learning", "DBMS", "Operating Systems",
-      "Computer Networks", "DSA", "OOP", "System Design"
-    ]
+      "Data Structures and Algorithms",
+      "Algorithms",
+      "Object-Oriented Programming",
+      "Database Management Systems",
+      "Operating Systems",
+      "Computer Networks",
+      "System Design",
+      "Software Engineering",
+      "Machine Learning",
+      "Image Processing",
+      "Artificial Neural Networks"
+    ],
+    "gpa": "7.3/10"
   },
   "achievements": [
-    "Promoted intern to full-time Software Developer at Divyal Technology within 4 months for exceptional delivery.",
-    "RAG retrieval precision improved +16% (76% to 92%) in production AI system.",
-    "Power BI dashboard projected 12% revenue uplift on 10K+ sales records.",
-    "Active on LeetCode, HackerRank, Coding Ninjas (DSA/SQL), Kaggle (fraud detection & sales forecasting notebooks)."
+    "Reduced API latency by 30%.",
+    "Improved deployment efficiency by 40%.",
+    "Improved RAG retrieval precision from 76% to 92% (+16 percentage points).",
+    "Reported 99.96% fraud-model accuracy and 0.97 AUC-ROC on a dataset of approximately 284,000 records.",
+    "Reduced database round-trips by 60% using Redis caching in the e-commerce platform."
   ],
   "llm_rules": {
-    "locked_fields": [
-      "personal.name", "personal.email", "personal.phone",
-      "personal.linkedin", "personal.github", "personal.kaggle",
-      "experience[*].company", "experience[*].client",
-      "experience[*].title", "experience[*].start_date", "experience[*].end_date",
-      "education.institution", "education.degree",
-      "education.start_date", "education.end_date"
-    ],
-    "variable_fields": [
-      "summary (rewrite per JD, max 70 words)",
-      "primary_skills row order (reorder to match JD)",
-      "experience[*].bullets (swap keywords, keep metrics)",
-      "projects order (most relevant first)"
-    ],
-    "secondary_skill_rule": "Secondary skills may only appear on resume if they appear in the JD's required_skills list.",
-    "content_limits": {
-      "summary_max_words": 70,
-      "summary_max_lines": 4,
-      "experience_max_bullets_per_role": 5,
-      "experience_bullet_max_words": 25,
-      "project_max_bullets": 3,
-      "project_bullet_max_words": 22,
-      "max_projects_on_resume": 4,
-      "achievements_max_lines": 3
+    "source_notes": {
+      "target_roles": [
+        "Software Engineer",
+        "Backend Engineer",
+        "Full-Stack Engineer",
+        "AI Engineer",
+        "Applied AI Engineer",
+        "GenAI Engineer",
+        "AI Automation Engineer",
+        "Forward Deployed Engineer"
+      ],
+      "headline_strategy": "Prioritize keywords from the target job description while accurately reflecting demonstrated experience. Include adjacent technologies only when there is working knowledge or the job description specifically requires them.",
+      "professional_profile": "Python-first Software Engineer with hands-on experience building scalable backend systems, full-stack web applications, AI-powered automation platforms, and multi-agent LLM workflows. Experienced with FastAPI, Django, React, LangGraph, Playwright, REST APIs, Docker, AWS, and modern AI frameworks.",
+      "core_expertise": [
+        "Backend development (Python, FastAPI, Django, REST APIs)",
+        "Full-stack development (React, Vue.js, TypeScript)",
+        "Agentic AI and multi-agent systems (LangGraph, LangChain)",
+        "LLM applications and AI automation",
+        "Browser automation (Playwright)",
+        "Machine learning and NLP",
+        "System design and API architecture",
+        "SQL and database design",
+        "Docker, AWS, Git, Kubernetes, and CI/CD"
+      ],
+      "resume_tailoring": "Emphasize the strongest combination of software engineering, AI engineering, or full-stack experience for the target role while keeping all technical claims truthful and interview-defensible.",
+      "optional_positioning": [
+        "Java / Spring Boot (foundational knowledge)",
+        "Data Engineering",
+        "MLOps",
+        "RAG Pipelines",
+        "Computer Vision"
+      ],
+      "additional_links": {
+        "portfolio": "https://gaurav-sonkar-portfolio.vercel.app",
+        "leetcode": "https://leetcode.com/u/gaurav-sonkar/",
+        "hackerrank": "https://www.hackerrank.com/profile/sonkargaurav9131",
+        "coding_ninjas": "https://www.naukri.com/code360/profile/GauravSonkarBHU"
+      }
     }
   }
 }

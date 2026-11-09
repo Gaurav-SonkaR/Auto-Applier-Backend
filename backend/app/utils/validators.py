@@ -29,7 +29,7 @@ def validate_url(url: str) -> str:
     """Return `url` if it is a well-formed http(s) URL, else raise.
 
     Rejecting non-http schemes matters because these URLs are later handed to
-    Playwright's `page.goto`, which will happily open `file://` and read local
+    browser navigation, which could otherwise open `file://` and read local
     files into the scraped job description.
     """
     if not url or not url.strip():

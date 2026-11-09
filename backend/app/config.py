@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,13 +22,27 @@ class Settings(BaseSettings):
     # ── Job Discovery ─────────────────────────────────────────────────────────
     serper_api_key: str = Field(default="", description="Serper.dev search API key")
     daily_search_limit: int = Field(default=100, ge=1, le=500)
+    discovery_recency_days: int = Field(default=2, ge=1, le=30)
 
     # ── Application Settings ──────────────────────────────────────────────────
     daily_apply_limit: int = Field(default=50, ge=1, le=200)
     scrape_batch_size: int = Field(default=10, ge=1, le=50)
     apply_batch_size: int = Field(default=3, ge=1, le=10)
-    playwright_headless: bool = Field(default=True)
-    playwright_max_browsers: int = Field(default=2, ge=1, le=5)
+    selenium_headless: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("SELENIUM_HEADLESS", "PLAYWRIGHT_HEADLESS"),
+    )
+    selenium_max_drivers: int = Field(
+        default=2,
+        ge=1,
+        le=5,
+        validation_alias=AliasChoices("SELENIUM_MAX_DRIVERS", "PLAYWRIGHT_MAX_BROWSERS"),
+    )
+    chrome_binary: str = Field(
+        default="",
+        description="Optional Chrome/Chromium executable path",
+        validation_alias=AliasChoices("CHROME_BINARY", "SELENIUM_CHROME_BINARY"),
+    )
     human_delay_min_ms: int = Field(default=800, ge=200)
     human_delay_max_ms: int = Field(default=2500, ge=500)
 
@@ -88,7 +102,6 @@ class Settings(BaseSettings):
     # Rehearse every portal application: fill the form, screenshot it, never
     # click submit. Also available per run from the dashboard.
     apply_dry_run: bool = Field(default=False)
-    fit_experience_tolerance_years: float = Field(default=1.0, ge=0.0, le=10.0)
     fit_min_skill_overlap: float = Field(default=0.3, ge=0.0, le=1.0)
     resume_max_retries: int = Field(default=3, ge=1, le=5)
 

@@ -29,7 +29,7 @@ class TestValidateUrl:
         "ftp://example.com/x",
     ])
     def test_rejects_non_http_schemes(self, url):
-        """These reach Playwright's page.goto — file:// would read local files
+        """These reach browser navigation — file:// would read local files
         straight into the scraped job description."""
         with pytest.raises(ValidationError):
             validate_url(url)

@@ -1,22 +1,19 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-import random
 from contextlib import closing
 from datetime import datetime, timezone
 from typing import Optional
 
-from playwright.async_api import Browser, BrowserContext, Page, async_playwright
-from playwright_stealth import Stealth
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from backend.app.config import get_settings
 from backend.app.database import get_session
 from backend.app.models.job import Job, JobStatus
-from backend.app.services.browser_pool import browser_semaphore, random_human_delay as _human_delay
+from backend.app.services.browser_pool import random_human_delay as _human_delay
 from backend.app.services.portal_templates import get_template, PortalTemplate
+from backend.app.services.selenium_browser import SeleniumPage, selenium_session
 
 logger = logging.getLogger("agent.scraper")
 
@@ -39,24 +36,17 @@ async def scrape_jobs(
 
     logger.info("Scraping %s — query='%s' location='%s' batch=%d", portal, job_title, location, size)
 
-    async with browser_semaphore(), async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=settings.playwright_headless)
-        try:
-            ctx = await _make_context(browser, settings.playwright_headless)
-            page = await ctx.new_page()
-            await Stealth().apply_stealth_async(page)
+    async with selenium_session(settings, locale="en-IN") as session:
+        page = session.page
+        await page.navigate(search_url, timeout=30_000)
+        await page.handle_cookie_consent()
+        await _human_delay(settings)
 
-            await page.goto(search_url, wait_until="domcontentloaded", timeout=30_000)
-            await _human_delay(settings)
+        if template.requires_login() and not await _is_logged_in(page, template):
+            await _login(page, template, settings, portal)
 
-            if template.requires_login() and not await _is_logged_in(page, template):
-                await _login(page, template, settings, portal)
-
-            postings = await _collect_job_urls(page, template, size, settings)
-            logger.info("Found %d job links on %s", len(postings), portal)
-
-        finally:
-            await browser.close()
+        postings = await _collect_job_urls(page, template, size, settings)
+        logger.info("Found %d job links on %s", len(postings), portal)
 
     # Fall back to the search query as the title only for cards whose own
     # title element didn't resolve (dead selector, layout change) — every job
@@ -95,36 +85,30 @@ async def scrape_recommended_jobs(
     size = batch_size or settings.scrape_batch_size
     logger.info("Resume-driven scrape on %s — batch=%d", portal, size)
 
-    async with browser_semaphore(), async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=settings.playwright_headless)
-        try:
-            ctx = await _make_context(browser, settings.playwright_headless)
-            page = await ctx.new_page()
-            await Stealth().apply_stealth_async(page)
+    async with selenium_session(settings, locale="en-IN") as session:
+        page = session.page
+        await page.navigate(template.base_url, timeout=30_000)
+        await page.handle_cookie_consent()
+        await _human_delay(settings)
 
-            await page.goto(template.base_url, wait_until="domcontentloaded", timeout=30_000)
-            await _human_delay(settings)
-
-            if template.requires_login() and not await _is_logged_in(page, template):
-                await _login(page, template, settings, portal)
-                if not await _is_logged_in(page, template):
-                    logger.warning(
-                        "%s: login required for resume-driven search but failed — skipping",
-                        portal,
-                    )
-                    return []
-
-            if not await _upload_resume_to_profile(page, template, resume_path, settings):
+        if template.requires_login() and not await _is_logged_in(page, template):
+            await _login(page, template, settings, portal)
+            if not await _is_logged_in(page, template):
                 logger.warning(
-                    "%s: could not upload resume to profile — skipping resume-driven search",
+                    "%s: login required for resume-driven search but failed — skipping",
                     portal,
                 )
                 return []
 
-            postings = await _scrape_recommended_page(page, template, size, settings)
-            logger.info("%s: %d recommended job link(s) found", portal, len(postings))
-        finally:
-            await browser.close()
+        if not await _upload_resume_to_profile(page, template, resume_path, settings):
+            logger.warning(
+                "%s: could not upload resume to profile — skipping resume-driven search",
+                portal,
+            )
+            return []
+
+        postings = await _scrape_recommended_page(page, template, size, settings)
+        logger.info("%s: %d recommended job link(s) found", portal, len(postings))
 
     if not postings:
         return []
@@ -134,7 +118,7 @@ async def scrape_recommended_jobs(
 
 
 async def _upload_resume_to_profile(
-    page: Page, template: PortalTemplate, resume_path: str, settings
+    page: SeleniumPage, template: PortalTemplate, resume_path: str, settings
 ) -> bool:
     """Navigate to the portal's resume/profile page and attach `resume_path`."""
     sel = template.selectors
@@ -142,21 +126,22 @@ async def _upload_resume_to_profile(
         return False
     try:
         profile_url = template.resolve_url(sel.profile_resume_page) or template.base_url
-        await page.goto(profile_url, wait_until="domcontentloaded", timeout=20_000)
+        await page.navigate(profile_url, timeout=20_000)
+        await page.handle_cookie_consent()
         await _human_delay(settings)
 
-        upload_input = await page.query_selector(sel.profile_resume_upload)
+        upload_input = await page.find(sel.profile_resume_upload)
         if not upload_input:
             logger.warning("%s: resume upload field not found on profile page", template.name)
             return False
-        await upload_input.set_input_files(resume_path)
+        await upload_input.set_file(resume_path)
         await _human_delay(settings)
 
         if sel.profile_resume_save_button:
-            save_btn = await page.query_selector(sel.profile_resume_save_button)
+            save_btn = await page.find(sel.profile_resume_save_button)
             if save_btn:
                 await save_btn.click()
-                await page.wait_for_load_state("networkidle", timeout=15_000)
+                await page.wait_ready(timeout=15_000)
 
         logger.info("Uploaded resume to %s profile", template.name)
         return True
@@ -166,7 +151,7 @@ async def _upload_resume_to_profile(
 
 
 async def _scrape_recommended_page(
-    page: Page, template: PortalTemplate, max_count: int, settings
+    page: SeleniumPage, template: PortalTemplate, max_count: int, settings
 ) -> list[str]:
     """Navigate to the portal-curated job listing and collect links from it —
     reuses `_collect_job_urls`, since a recommendations page is structurally
@@ -177,7 +162,8 @@ async def _scrape_recommended_page(
     if not url:
         return []
     try:
-        await page.goto(url, wait_until="domcontentloaded", timeout=20_000)
+        await page.navigate(url, timeout=20_000)
+        await page.handle_cookie_consent()
         await _human_delay(settings)
         return await _collect_job_urls(page, template, max_count, settings)
     except Exception as exc:
@@ -185,31 +171,17 @@ async def _scrape_recommended_page(
         return []
 
 
-async def _make_context(browser: Browser, headless: bool) -> BrowserContext:
-    return await browser.new_context(
-        viewport={"width": 1280, "height": 800},
-        user_agent=(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/125.0.0.0 Safari/537.36"
-        ),
-        locale="en-IN",
-        java_script_enabled=True,
-    )
-
-
-async def _is_logged_in(page: Page, template: PortalTemplate) -> bool:
+async def _is_logged_in(page: SeleniumPage, template: PortalTemplate) -> bool:
     indicator = template.selectors.login_detection_element
     if not indicator:
         return True
     try:
-        await page.wait_for_selector(indicator, timeout=3_000)
-        return True
-    except Exception:
+        return await page.wait_for(indicator, timeout=3_000, visible=True) is not None
+    except WebDriverException:
         return False
 
 
-async def _login(page: Page, template: PortalTemplate, settings, portal: str) -> None:
+async def _login(page: SeleniumPage, template: PortalTemplate, settings, portal: str) -> None:
     sel = template.selectors
     # Generic per-portal credential resolution — mirrors applier._ensure_logged_in.
     # Email falls back to the shared Gmail address (many portals support Google
@@ -226,18 +198,25 @@ async def _login(page: Page, template: PortalTemplate, settings, portal: str) ->
         return
 
     try:
-        await page.goto(f"{template.base_url}/login", wait_until="domcontentloaded", timeout=20_000)
-        await page.fill(sel.login_email_input, email)
-        await page.fill(sel.login_password_input, password)
-        await page.click(sel.login_submit_button)
-        await page.wait_for_load_state("networkidle", timeout=15_000)
+        await page.navigate(f"{template.base_url}/login", timeout=20_000)
+        await page.handle_cookie_consent()
+        email_input = await page.wait_for(sel.login_email_input, timeout=8_000, visible=True)
+        password_input = await page.wait_for(sel.login_password_input, timeout=8_000, visible=True)
+        submit = await page.wait_for(sel.login_submit_button, timeout=8_000, visible=True)
+        if not email_input or not password_input or not submit:
+            logger.warning("Login selectors did not resolve for %s", portal)
+            return
+        await email_input.fill(email)
+        await password_input.fill(password)
+        await submit.click()
+        await page.wait_ready(timeout=15_000)
         logger.info("Logged in to %s", portal)
     except Exception as exc:
         logger.error("Login failed for %s: %s", portal, exc)
 
 
 async def _collect_job_urls(
-    page: Page,
+    page: SeleniumPage,
     template: PortalTemplate,
     max_count: int,
     settings,
@@ -256,12 +235,11 @@ async def _collect_job_urls(
     page_num = 0
 
     while len(postings) < max_count:
-        await page.wait_for_load_state("domcontentloaded")
-        cards = await page.query_selector_all(sel.job_card)
+        cards = await page.find_all(sel.job_card)
         for card in cards:
             if len(postings) >= max_count:
                 break
-            link_el = await card.query_selector(sel.job_link_in_card)
+            link_el = await card.find(sel.job_link_in_card)
             if not link_el:
                 continue
             href = await link_el.get_attribute("href") or ""
@@ -273,21 +251,21 @@ async def _collect_job_urls(
 
             title = ""
             if sel.job_title_in_card:
-                title_el = await card.query_selector(sel.job_title_in_card)
+                title_el = await card.find(sel.job_title_in_card)
                 if title_el:
-                    title = (await title_el.inner_text()).strip()
+                    title = (await title_el.text()).strip()
 
             seen_urls.add(full_url)
             postings.append((full_url, title))
 
         # Try next page
         if len(postings) < max_count and sel.next_page_button:
-            next_btn = await page.query_selector(sel.next_page_button)
+            next_btn = await page.find(sel.next_page_button)
             if next_btn and await next_btn.is_enabled():
                 page_num += 1
                 await _human_delay(settings)
                 await next_btn.click()
-                await page.wait_for_load_state("domcontentloaded", timeout=15_000)
+                await page.wait_ready(timeout=15_000)
             else:
                 break
         else:

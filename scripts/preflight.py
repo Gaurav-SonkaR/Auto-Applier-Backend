@@ -4,7 +4,7 @@
 Nothing here applies to a job, submits a form or emails anyone else.
 
     python scripts/preflight.py portals                  # logged out: search + job page selectors
-    python scripts/preflight.py portals --portal naukri --login --headed
+    python scripts/preflight.py portals --portal naukri --login --user-id 1 --headed
                                                          # signs in with .env credentials, saves
                                                          # the session, checks the Apply button
     python scripts/preflight.py storage                  # S3 put / presigned get / delete
@@ -27,6 +27,7 @@ import tempfile
 import urllib.request
 import uuid
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.app.config import get_settings  # noqa: E402
@@ -52,7 +53,7 @@ async def _count(page, selector: str, within=None) -> int:
     if not selector:
         return -1
     try:
-        return len(await (within or page).query_selector_all(selector))
+        return len(await (within or page).find_all(selector))
     except Exception:
         return 0
 
@@ -65,95 +66,102 @@ def _selector_report(portal: str, what: str, selector: str, count: int) -> None:
                f"{count} match(es) for {selector!r}")
 
 
-async def check_portal(pw, portal: str, query: str, location: str, login: bool,
-                       headed: bool) -> None:
-    from playwright_stealth import Stealth
-
+async def check_portal(portal: str, query: str, location: str, login: bool,
+                       headed: bool, user_id: Optional[int] = None) -> None:
     from backend.app.services import applier, scraper
     from backend.app.services.portal_templates import get_template
+    from backend.app.services.selenium_browser import selenium_session
 
     settings = get_settings()
     template = get_template(portal)
     sel = template.selectors
     print(f"\n== {portal} ({'signed in' if login else 'logged out'}) ==")
 
-    browser = await pw.chromium.launch(headless=not headed)
     try:
-        ctx = await scraper._make_context(browser, not headed)
-        page = await ctx.new_page()
-        await Stealth().apply_stealth_async(page)
+        async with selenium_session(settings, headless=not headed, locale="en-IN") as session:
+            page = session.page
+            if login:
+                if not template.requires_login():
+                    report("skip", f"{portal}: sign-in", "this template has no login form")
+                else:
+                    auth_path = applier._auth_state_path(portal, settings, user_id)
+                    signed_in = await applier._ensure_logged_in(
+                        page, session, template, settings, portal, auth_path
+                    )
+                    report(
+                        "ok" if signed_in else "fail", f"{portal}: sign-in",
+                        f"session saved to {auth_path}" if signed_in
+                        else f"still signed out at {await page.current_url_async()} "
+                             "(credentials, OTP or selectors)",
+                    )
+                    if not signed_in:
+                        return
 
-        if login:
-            if not template.requires_login():
-                report("skip", f"{portal}: sign-in", "this template has no login form")
+            url = template.build_search_url(query, location)
+            try:
+                await page.navigate(url, timeout=30_000)
+                await page.handle_cookie_consent()
+                await page.wait_ready(timeout=10_000)
+                status = "loaded"
+            except Exception as exc:
+                status = f"navigation failed ({type(exc).__name__})"
+            title = await page.title()
+            blocked = bool(_BLOCKED.search(title)) or await applier._has_captcha(page)
+            report(
+                "fail" if blocked or status != "loaded" else "ok",
+                f"{portal}: search page",
+                f"{status}, title {title[:60]!r}, at {(await page.current_url_async())[:90]}",
+            )
+            if blocked:
+                report("fail", f"{portal}: bot check", "the portal is challenging this browser")
+                return
+
+            cards = await page.find_all(sel.job_card) if sel.job_card else []
+            _selector_report(portal, "job cards", sel.job_card,
+                             len(cards) if sel.job_card else -1)
+            links = [await card.find(sel.job_link_in_card) for card in cards[:10]]
+            links = [link for link in links if link]
+            _selector_report(portal, "job link in card", sel.job_link_in_card,
+                             len(links) if sel.job_link_in_card else -1)
+            if cards:
+                _selector_report(portal, "job title in card", sel.job_title_in_card,
+                                 await _count(page, sel.job_title_in_card, cards[0]))
+            if not links:
+                return
+
+            href = await links[0].get_attribute("href") or ""
+            job_url = scraper._resolve_url(href, template.base_url)
+            await page.navigate(job_url, timeout=30_000)
+            await page.handle_cookie_consent()
+            await page.wait_ready(timeout=10_000)
+            print(f"   job page: {(await page.current_url_async())[:110]}")
+            for what, selector in (("job description", sel.job_description_container),
+                                   ("job title", sel.job_title),
+                                   ("company name", sel.company_name)):
+                _selector_report(portal, what, selector, await _count(page, selector))
+            # Only looked for. Signed out, most portals show a sign-in prompt instead.
+            apply_selector = sel.easy_apply_button or sel.apply_button
+            count = await _count(page, apply_selector)
+            if login:
+                _selector_report(portal, "apply button (not clicked)", apply_selector, count)
             else:
-                auth_path = applier._auth_state_path(portal, settings)
-                signed_in = await applier._ensure_logged_in(page, ctx, template, settings,
-                                                            portal, auth_path)
-                report("ok" if signed_in else "fail", f"{portal}: sign-in",
-                       f"session saved to {auth_path}" if signed_in
-                       else f"still signed out at {page.url} (credentials, OTP or selectors)")
-                if not signed_in:
-                    return
-
-        url = template.build_search_url(query, location)
-        response = await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-        await page.wait_for_timeout(4_000)
-        title = await page.title()
-        status = response.status if response else "?"
-        blocked = _BLOCKED.search(title) or await applier._has_captcha(page)
-        report("fail" if blocked or status == "?" or int(status) >= 400 else "ok",
-               f"{portal}: search page", f"HTTP {status}, title {title[:60]!r}, at {page.url[:90]}")
-        if blocked:
-            report("fail", f"{portal}: bot check", "the portal is challenging this browser")
-            return
-
-        cards = await page.query_selector_all(sel.job_card) if sel.job_card else []
-        _selector_report(portal, "job cards", sel.job_card, len(cards) if sel.job_card else -1)
-        links = [await c.query_selector(sel.job_link_in_card) for c in cards[:10]]
-        links = [link for link in links if link]
-        _selector_report(portal, "job link in card", sel.job_link_in_card,
-                         len(links) if sel.job_link_in_card else -1)
-        if cards:
-            _selector_report(portal, "job title in card", sel.job_title_in_card,
-                             await _count(page, sel.job_title_in_card, cards[0]))
-        if not links:
-            return
-
-        href = await links[0].get_attribute("href") or ""
-        job_url = scraper._resolve_url(href, template.base_url)
-        await page.goto(job_url, wait_until="domcontentloaded", timeout=30_000)
-        await page.wait_for_timeout(4_000)
-        print(f"   job page: {page.url[:110]}")
-        for what, selector in (("job description", sel.job_description_container),
-                               ("job title", sel.job_title),
-                               ("company name", sel.company_name)):
-            _selector_report(portal, what, selector, await _count(page, selector))
-        # Only looked for. Signed out, most portals show a sign-in prompt instead.
-        apply_selector = sel.easy_apply_button or sel.apply_button
-        count = await _count(page, apply_selector)
-        if login:
-            _selector_report(portal, "apply button (not clicked)", apply_selector, count)
-        else:
-            report("ok" if count > 0 else "skip", f"{portal}: apply button (not clicked)",
-                   f"{count} match(es)" + ("" if count > 0 else " - often hidden until signed in"))
+                report("ok" if count > 0 else "skip", f"{portal}: apply button (not clicked)",
+                       f"{count} match(es)" + ("" if count > 0 else
+                                               " - often hidden until signed in"))
     except Exception as exc:
         report("fail", f"{portal}: check crashed", str(exc)[:200])
-    finally:
-        await browser.close()
 
 
 async def check_portals(args) -> None:
-    from playwright.async_api import async_playwright
-
     from backend.app.services.applier import MANUAL_APPLY_PORTAL
     from backend.app.services.portal_templates import list_portals
 
     portals = [args.portal] if args.portal else [p for p in list_portals()
                                                  if p != MANUAL_APPLY_PORTAL]
-    async with async_playwright() as pw:
-        for portal in portals:
-            await check_portal(pw, portal, args.query, args.location, args.login, args.headed)
+    for portal in portals:
+        await check_portal(
+            portal, args.query, args.location, args.login, args.headed, args.user_id
+        )
 
 
 # ── Storage ─────────────────────────────────────────────────────────────────
@@ -258,6 +266,8 @@ def main() -> int:
     portals.add_argument("--location", default="India")
     portals.add_argument("--login", action="store_true",
                          help="sign in with the .env credentials first (needs --portal)")
+    portals.add_argument("--user-id", type=int,
+                         help="account id for the saved per-user browser session (required with --login)")
     portals.add_argument("--headed", action="store_true", help="show the browser")
 
     sub.add_parser("storage", help="S3 upload, presigned download and delete")
@@ -270,6 +280,8 @@ def main() -> int:
     if args.check == "portals":
         if args.login and not args.portal:
             parser.error("--login signs in to a real account; name one --portal")
+        if args.login and not args.user_id:
+            parser.error("--login requires --user-id to save the session to the correct account")
         asyncio.run(check_portals(args))
     elif args.check == "storage":
         check_storage(args)

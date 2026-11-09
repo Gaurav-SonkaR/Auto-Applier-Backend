@@ -4,10 +4,11 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlparse
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from backend.app.config import get_settings
@@ -15,7 +16,6 @@ from backend.app.database import engine
 from backend.app.database import init
 from backend.app.models.job import Job, JobStatus
 from backend.app.models.run_log import RunLog, RunType
-from backend.app.services.browser_pool import browser_semaphore
 from backend.app.services.discovery import DailySearchLimitReached, get_discovery_agent
 from backend.app.workflows.run_loop import finalize_run, run_job_graph_loop
 from backend.app.workflows.state import DiscoveryConfig, EventCallback, RunResult
@@ -106,43 +106,37 @@ async def _expand_career_pages(urls: set[str], batch_size: int, settings) -> lis
     listings = [u for u in urls if u not in postings]
 
     if listings and len(postings) < batch_size:
-        from playwright.async_api import async_playwright
-        from playwright_stealth import Stealth
+        from backend.app.services.selenium_browser import selenium_session
 
-        async with browser_semaphore(), async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=settings.playwright_headless)
-            try:
-                ctx = await browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/125.0.0.0 Safari/537.36"
+        async with selenium_session(
+            settings,
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0.0.0 Safari/537.36"
+            ),
+        ) as session:
+            page = session.page
+            for listing_url in listings:
+                if len(postings) >= batch_size:
+                    break
+                try:
+                    await page.navigate(listing_url, timeout=20_000)
+                    await page.handle_cookie_consent()
+                    await page.wait_for("a[href]", timeout=3_000)
+                    anchors = await page.find_all("a[href]")
+                    hrefs = [await anchor.get_attribute("href") for anchor in anchors]
+                    found = _extract_posting_links(
+                        hrefs, listing_url, _MAX_LINKS_PER_LISTING
                     )
-                )
-                page = await ctx.new_page()
-                await Stealth().apply_stealth_async(page)
-                for listing_url in listings:
-                    if len(postings) >= batch_size:
-                        break
-                    try:
-                        await page.goto(listing_url, wait_until="domcontentloaded", timeout=20_000)
-                        # Career pages are usually JS SPAs — anchors render after
-                        # domcontentloaded, so give the framework a beat to paint.
-                        await page.wait_for_timeout(3_000)
-                        hrefs = await page.eval_on_selector_all(
-                            "a[href]", "els => els.map(e => e.href)"
-                        )
-                        found = _extract_posting_links(hrefs, listing_url, _MAX_LINKS_PER_LISTING)
-                        for link in found:
-                            if link not in postings:
-                                postings.append(link)
-                        logger.info(
-                            "Career page %s → %d posting link(s)", listing_url[:70], len(found)
-                        )
-                    except Exception as exc:
-                        logger.warning("Career-page crawl failed for %s: %s", listing_url[:80], exc)
-            finally:
-                await browser.close()
+                    for link in found:
+                        if link not in postings:
+                            postings.append(link)
+                    logger.info(
+                        "Career page %s → %d posting link(s)", listing_url[:70], len(found)
+                    )
+                except Exception as exc:
+                    logger.warning("Career-page crawl failed for %s: %s", listing_url[:80], exc)
 
     logger.info(
         "Discovery expansion: %d direct posting(s), %d listing page(s) crawled → %d posting URL(s) total",
@@ -151,7 +145,17 @@ async def _expand_career_pages(urls: set[str], batch_size: int, settings) -> lis
     return postings[:batch_size]
 
 
-def _build_profile_queries(job_title: str, location: str) -> list[str]:
+def _with_recency(query: str, recency_days: int) -> str:
+    """Constrain Google results to the configured calendar-date window."""
+    today = datetime.now(timezone.utc).date()
+    after = today - timedelta(days=recency_days)
+    before = today + timedelta(days=1)
+    return f"{query} after:{after.isoformat()} before:{before.isoformat()}"
+
+
+def _build_profile_queries(
+    job_title: str, location: str, recency_days: int = 2
+) -> list[str]:
     """
     Build Google search queries that target company career pages only,
     from a manually-supplied job title. All queries append portal
@@ -171,7 +175,7 @@ def _build_profile_queries(job_title: str, location: str) -> list[str]:
         f"{job_title} {_ATS_SITES_QUERY}",
         f"{job_title} startup company job {location_tag} {ex}",
     ]
-    return [q.strip() for q in queries if q.strip()]
+    return [_with_recency(q.strip(), recency_days) for q in queries if q.strip()]
 
 
 _DEFAULT_SMART_TITLE = "Software Engineer"
@@ -179,9 +183,9 @@ _DEFAULT_SMART_TITLE = "Software Engineer"
 
 def _load_profile_summary(user_id: int) -> tuple[str, list[str]]:
     """
-    Return (most_recent_job_title, top_primary_skills) from this account's own
-    profile. Falls back to a generic title and no skills when the profile is
-    empty — smart search should degrade gracefully, never crash the run.
+    Return a display title and top primary skills from this account's profile.
+    Smart Search itself validates that role and skills are present before
+    building queries.
     """
     from backend.app.services import profiles
 
@@ -194,6 +198,13 @@ def _load_profile_summary(user_id: int) -> tuple[str, list[str]]:
     return recent_title, top_skills
 
 
+def _load_smart_profile(user_id: int) -> dict:
+    from backend.app.services import profiles
+
+    with Session(engine) as session:
+        return profiles.get_profile(session, user_id)
+
+
 def _build_smart_queries(location: str, user_id: int) -> list[str]:
     """
     Build Google search queries derived automatically from master_profile.json —
@@ -201,25 +212,97 @@ def _build_smart_queries(location: str, user_id: int) -> list[str]:
     top primary skills to target company career pages matching the user's
     actual experience, not a manually-typed keyword.
     """
-    ex = _PORTAL_EXCLUSIONS
+    settings = get_settings()
+    profile = _load_smart_profile(user_id)
+    experience = profile.get("experience") or []
+    primary_skills = [s.strip() for s in (profile.get("primary_skills") or [])
+                      if isinstance(s, str) and s.strip()]
+    llm_rules = profile.get("llm_rules") or {}
+    notes = llm_rules.get("source_notes") or {}
+    target_roles = [r.strip() for r in (notes.get("target_roles") or [])
+                    if isinstance(r, str) and r.strip()]
+    experience_title = (experience[0].get("title") if experience else None) or ""
+    roles = list(dict.fromkeys(target_roles or ([experience_title] if experience_title else [])))[:3]
+    if not roles or not primary_skills:
+        raise ValueError(
+            "Smart Search needs a target role (or recent experience) and primary skills in Profile."
+        )
+
+    years = (profile.get("preferences") or {}).get("total_experience_years") or ""
+    year_match = re.search(r"\d+(?:\.\d+)?", str(years))
+    if not year_match:
+        from backend.app.services.job_fit import candidate_years
+
+        inferred_years = candidate_years(profile)
+        if inferred_years is not None:
+            years = str(inferred_years)
+            year_match = re.search(r"\d+(?:\.\d+)?", years)
+    experience_hint = ""
+    if year_match:
+        number = float(year_match.group())
+        years_label = str(int(number)) if number.is_integer() else str(number)
+        experience_hint = f"{years_label} year{'s' if number != 1 else ''} experience"
+        if number <= 2:
+            experience_hint += " junior entry level"
+
+    if not (location or "").strip():
+        preferred = (profile.get("preferences") or {}).get("preferred_locations") or []
+        location = next((str(loc).strip() for loc in preferred if str(loc).strip()), "")
     location_tag = f"in {location}" if location else ""
-    recent_title, top_skills = _load_profile_summary(user_id)
-    skills = top_skills or [recent_title]
-
-    def _pair(i: int, j: int) -> str:
-        a = skills[i] if i < len(skills) else recent_title
-        b = skills[j] if j < len(skills) else ""
-        return f"{a} {b}".strip()
-
-    queries = [
-        f"{recent_title} careers {location_tag} {ex}",
-        f"{_pair(0, 1)} developer jobs {location_tag} {ex}",
-        f"{_pair(2, 3)} engineer job opening {location_tag} {ex}",
-        f"{recent_title} {_ATS_SITES_QUERY}",
-        f"{skills[0]} {recent_title} startup jobs {_ATS_SITES_QUERY}",
-        f"{skills[0]} {recent_title} startup company job {location_tag} {ex}",
+    ex = _PORTAL_EXCLUSIONS
+    skills = primary_skills[:4]
+    queries: list[str] = []
+    for index, role in enumerate(roles):
+        skill = skills[index % len(skills)] if skills else ""
+        queries.append(
+            f"{role} {experience_hint} {skill} careers {location_tag} {ex}"
+        )
+        queries.append(
+            f"{role} {experience_hint} {skill} {_ATS_SITES_QUERY}"
+        )
+    return [
+        _with_recency(query.strip(), settings.discovery_recency_days)
+        for query in queries[:6]
+        if query.strip()
     ]
-    return [q.strip() for q in queries if q.strip()]
+
+
+def _persist_discovered_postings(
+    session: Session,
+    posting_urls: list[str],
+    *,
+    user_id: int,
+    run_id: Optional[int],
+    display_title: str,
+) -> list[int]:
+    """Persist unique discovery results, tolerating concurrent duplicate inserts."""
+    new_job_ids: list[int] = []
+    for url in posting_urls:
+        existing = session.exec(
+            select(Job).where(Job.url == url, Job.user_id == user_id)
+        ).first()
+        if existing:
+            continue
+        job = Job(
+            user_id=user_id,
+            url=url,
+            portal="web",
+            title=display_title,
+            status=JobStatus.SCRAPED,
+            run_id=run_id,
+        )
+        session.add(job)
+        try:
+            session.commit()
+        except IntegrityError:
+            # A concurrent discovery run may win the per-owner unique index
+            # after the existence check above.
+            session.rollback()
+            logger.info("Concurrent duplicate skipped for %s", url[:100])
+            continue
+        session.refresh(job)
+        new_job_ids.append(job.job_id)
+    return new_job_ids
 
 
 async def run_discovery_pipeline(
@@ -247,6 +330,10 @@ async def run_discovery_pipeline(
     job_title, location, batch_size = config.job_title, config.location, config.batch_size
     is_smart_search = not job_title.strip()
     display_title = job_title.strip() or _load_profile_summary(config.user_id)[0]
+    if is_smart_search and not location.strip():
+        profile = _load_smart_profile(config.user_id)
+        preferred = (profile.get("preferences") or {}).get("preferred_locations") or []
+        location = next((str(loc).strip() for loc in preferred if str(loc).strip()), "")
 
     # Create RunLog entry
     run_log_id: Optional[int] = existing_run_id
@@ -289,7 +376,11 @@ async def run_discovery_pipeline(
 
     # 1. Discover job URLs
     agent = get_discovery_agent()
-    queries = _build_smart_queries(location, config.user_id) if is_smart_search else _build_profile_queries(job_title, location)
+    queries = (
+        _build_smart_queries(location, config.user_id)
+        if is_smart_search
+        else _build_profile_queries(job_title, location, settings.discovery_recency_days)
+    )
     discovered_urls: set[str] = set()
 
     for query in queries:
@@ -311,26 +402,14 @@ async def run_discovery_pipeline(
     # 2. Expand career/listing pages into individual job postings, then persist
     posting_urls = await _expand_career_pages(discovered_urls, batch_size, settings)
 
-    new_job_ids: list[int] = []
     with Session(engine) as session:
-        for url in posting_urls:
-            existing = session.exec(
-                select(Job).where(Job.url == url, Job.user_id == config.user_id)
-            ).first()
-            if existing:
-                continue
-            job = Job(
-                user_id=config.user_id,
-                url=url,
-                portal="web",
-                title=display_title,
-                status=JobStatus.SCRAPED,
-                run_id=run_log_id,
-            )
-            session.add(job)
-            session.commit()
-            session.refresh(job)
-            new_job_ids.append(job.job_id)
+        new_job_ids = _persist_discovered_postings(
+            session,
+            posting_urls,
+            user_id=config.user_id,
+            run_id=run_log_id,
+            display_title=display_title,
+        )
 
     result.jobs_scraped = len(new_job_ids)
     logger.info("Run %d: saved %d new web jobs", run_log_id, len(new_job_ids))

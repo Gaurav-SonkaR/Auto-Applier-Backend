@@ -9,7 +9,7 @@ class NaukriTemplate(PortalTemplate):
     best-effort — Naukri's own "Recommended Jobs" / "Jobs 4 u" widget is a real,
     long-standing feature keyed off the resume in your profile, but the exact
     paths/selectors below are unverified against the live DOM. Run one headed
-    scrape (PLAYWRIGHT_HEADLESS=false) with a master resume set before relying
+    scrape (SELENIUM_HEADLESS=false) with a master resume set before relying
     on this in an unattended run; scraper.scrape_recommended_jobs falls back to
     keyword search automatically if upload or scraping fails.
     """

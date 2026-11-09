@@ -263,7 +263,9 @@ def set_job_status(
                 select(Application).where(Application.job_id == job_id)
             ).first()
             if not already_logged:
-                session.add(Application(job_id=job_id, submitted_at=now))
+                session.add(Application(
+                    user_id=job.user_id, job_id=job_id, submitted_at=now
+                ))
 
         session.commit()
         session.refresh(job)

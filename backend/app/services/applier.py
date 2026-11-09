@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from playwright.async_api import BrowserContext, Page, async_playwright
-from playwright_stealth import Stealth
 from sqlmodel import Session
 
 from backend.app.config import get_settings
@@ -23,6 +21,7 @@ from backend.app.models.job import Job, JobStatus
 from backend.app.models.job_stage_event import JobStageEvent
 from backend.app.services.llm_client import LLMTask, get_llm_router
 from backend.app.services.portal_templates import get_template
+from backend.app.services.selenium_browser import SeleniumPage, SeleniumSession, selenium_session
 from backend.app.services.form_autofill import (
     unanswered_required,
     RADIO_GROUPS_JS,
@@ -61,9 +60,10 @@ _LI_LABELS = ["Continue to next step", "Review your application", "Submit applic
 _LI_SUBMIT_LABEL = "Submit application"
 
 
-def _auth_state_path(portal: str, settings) -> Path:
-    """Return the path where the browser session cookies are saved."""
-    return Path(settings.log_dir) / f"auth_{portal}.json"
+def _auth_state_path(portal: str, settings, user_id: Optional[int] = None) -> Path:
+    """Return an account-scoped path for saved browser session cookies."""
+    owner = str(user_id) if user_id is not None else "unowned"
+    return Path(settings.log_dir) / f"auth_{portal}_{owner}.json"
 
 
 # Smart Job Apply. Defined here rather than in run_loop because applier.py is
@@ -135,28 +135,24 @@ async def apply_to_job(
 async def _browser_apply(job: Job, resume_path: str, template, settings,
                          dry_run: bool = False) -> ApplyResult:
     """Launch a browser, restore any saved session, and run the apply flow."""
-    auth_path = _auth_state_path(job.portal, settings)
+    auth_path = _auth_state_path(job.portal, settings, job.user_id)
 
-    async with browser_semaphore(), async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=settings.playwright_headless)
+    async with selenium_session(
+        settings,
+        user_agent=(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/125.0.0.0 Safari/537.36"
+        ),
+        storage_path=str(auth_path) if auth_path.exists() else "",
+        base_url=template.base_url,
+    ) as session:
+        page = session.page
         try:
-            ctx = await browser.new_context(
-                viewport={"width": 1280, "height": 800},
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/125.0.0.0 Safari/537.36"
-                ),
-                # Restore saved cookies/localStorage if we've logged in before
-                storage_state=str(auth_path) if auth_path.exists() else None,
-            )
-            page = await ctx.new_page()
-            await Stealth().apply_stealth_async(page)
-
             # Login if the portal requires it (LinkedIn, Naukri, etc.)
             if template.requires_login():
                 logged_in = await _ensure_logged_in(
-                    page, ctx, template, settings, job.portal, auth_path
+                    page, session, template, settings, job.portal, auth_path
                 )
                 if not logged_in:
                     return ApplyResult(
@@ -177,15 +173,22 @@ async def _browser_apply(job: Job, resume_path: str, template, settings,
                     reason=str(exc)[:500],
                     screenshot_path=screenshot,
                 )
-        finally:
-            await browser.close()
+        except Exception as exc:
+            logger.error("Apply flow error for job %d: %s", job.job_id, exc, exc_info=True)
+            screenshot = await _screenshot(page, job.job_id, settings.screenshots_dir, "error")
+            result = ApplyResult(
+                job_id=job.job_id,
+                status=JobStatus.FAILED,
+                reason=str(exc)[:500],
+                screenshot_path=screenshot,
+            )
 
     return result
 
 
 async def _ensure_logged_in(
-    page: Page,
-    ctx: BrowserContext,
+    page: SeleniumPage,
+    session: SeleniumSession,
     template,
     settings,
     portal: str,
@@ -196,8 +199,8 @@ async def _ensure_logged_in(
     Saves session state on success so subsequent jobs skip the login step.
     """
     try:
-        await page.goto(template.base_url, wait_until="domcontentloaded", timeout=20_000)
-        await asyncio.sleep(2)
+        await page.navigate(template.base_url, timeout=20_000)
+        await page.handle_cookie_consent()
 
         if await _is_logged_in(page, template):
             return True
@@ -217,19 +220,23 @@ async def _ensure_logged_in(
             )
             return False
 
-        await page.fill(sel.login_email_input, portal_email)
-        await asyncio.sleep(0.5)
-        await page.fill(sel.login_password_input, portal_password)
-        await asyncio.sleep(0.5)
-        await page.click(sel.login_submit_button)
-        await asyncio.sleep(3)
+        email_input = await page.wait_for(sel.login_email_input, timeout=10_000, visible=True)
+        password_input = await page.wait_for(sel.login_password_input, timeout=10_000, visible=True)
+        submit = await page.wait_for(sel.login_submit_button, timeout=10_000, visible=True)
+        if not email_input or not password_input or not submit:
+            logger.warning("Login form selectors did not resolve for %s", portal)
+            return False
+        await email_input.fill(portal_email)
+        await password_input.fill(portal_password)
+        await submit.click()
+        await page.wait_ready(timeout=20_000)
 
         if await _is_logged_in(page, template):
-            await ctx.storage_state(path=str(auth_path))
+            await session.save_state(str(auth_path))
             logger.info("Logged into %s — session saved to %s", portal, auth_path)
             return True
 
-        logger.warning("Login to %s failed — current URL: %s", portal, page.url)
+        logger.warning("Login to %s failed — current URL: %s", portal, await page.current_url_async())
         return False
 
     except Exception as exc:
@@ -237,9 +244,9 @@ async def _ensure_logged_in(
         return False
 
 
-async def _is_logged_in(page: Page, template) -> bool:
+async def _is_logged_in(page: SeleniumPage, template) -> bool:
     """Return True if the current page indicates an active session."""
-    url = page.url.lower()
+    url = (await page.current_url_async()).lower()
     for marker in ("/login", "/signin", "/checkpoint", "/authwall"):
         if marker in url:
             return False
@@ -247,7 +254,7 @@ async def _is_logged_in(page: Page, template) -> bool:
     detection_sel = template.selectors.login_detection_element
     if detection_sel:
         try:
-            el = await page.query_selector(detection_sel)
+            el = await page.find(detection_sel)
             return el is not None
         except Exception as exc:
             logger.warning("Login-detection selector check failed (%s): %s", detection_sel, exc)
@@ -256,12 +263,13 @@ async def _is_logged_in(page: Page, template) -> bool:
 
 
 async def _run_apply_flow(
-    page: Page, job: Job, resume_path: str, template, settings, dry_run: bool = False
+    page: SeleniumPage, job: Job, resume_path: str, template, settings, dry_run: bool = False
 ) -> ApplyResult:
     sel = template.selectors
 
     # 1. Navigate to job page
-    await page.goto(job.url, wait_until="domcontentloaded", timeout=30_000)
+    await page.navigate(job.url, timeout=30_000)
+    await page.handle_cookie_consent()
     await _human_delay(settings)
 
     # 2. CAPTCHA check on landing page
@@ -277,7 +285,7 @@ async def _run_apply_flow(
 
     # 3. Find apply button
     apply_selector = sel.easy_apply_button or sel.apply_button
-    apply_btn = await page.query_selector(apply_selector) if apply_selector else None
+    apply_btn = await page.find(apply_selector) if apply_selector else None
 
     if apply_btn:
         href = await apply_btn.get_attribute("href") or ""
@@ -321,9 +329,9 @@ async def _run_apply_flow(
 
     # Upload resume if visible
     if sel.resume_upload:
-        upload_input = await page.query_selector(sel.resume_upload)
+        upload_input = await page.find(sel.resume_upload)
         if upload_input and await upload_input.is_visible():
-            await upload_input.set_input_files(resume_path)
+            await upload_input.set_file(resume_path)
             await _human_delay(settings)
             logger.debug("Job %d — resume uploaded", job.job_id)
 
@@ -339,7 +347,7 @@ async def _run_apply_flow(
         )
 
     # Submit
-    submit_btn = await page.query_selector(sel.submit_button)
+    submit_btn = await page.find(sel.submit_button)
     if not submit_btn:
         return ApplyResult(
             job_id=job.job_id,
@@ -350,12 +358,14 @@ async def _run_apply_flow(
         return await _rehearsal_result(page, job, settings, "dry_run")
     await _human_delay(settings)
     await submit_btn.click()
-    await page.wait_for_load_state("networkidle", timeout=20_000)
+    await page.wait_ready(timeout=20_000)
 
     # Confirm success
     if sel.success_indicator:
         try:
-            await page.wait_for_selector(sel.success_indicator, timeout=8_000)
+            await page.wait_for(sel.success_indicator, timeout=8_000, visible=True)
+            if not await page.find(sel.success_indicator):
+                raise TimeoutException(f"Success indicator not found: {sel.success_indicator}")
             screenshot = await _screenshot(page, job.job_id, settings.screenshots_dir, "success")
             logger.info("Job %d — APPLIED successfully", job.job_id)
             return ApplyResult(
@@ -384,21 +394,29 @@ async def _run_apply_flow(
     screenshot = await _screenshot(page, job.job_id, settings.screenshots_dir, "unknown")
     return ApplyResult(
         job_id=job.job_id,
-        status=JobStatus.FAILED,
-        reason="Could not confirm submission — no success indicator found",
+        status=JobStatus.NEED_HUMAN_ACTION,
+        reason=(
+            "Submission could not be confirmed — check the employer portal before retrying "
+            "to avoid a duplicate application"
+        ),
         screenshot_path=screenshot,
     )
 
 
 async def _linkedin_easy_apply(
-    page: Page, job: Job, resume_path: str, sel, settings, dry_run: bool = False
+    page: SeleniumPage, job: Job, resume_path: str, sel, settings, dry_run: bool = False
 ) -> ApplyResult:
     """
     Handle LinkedIn's multi-step Easy Apply modal.
     Each step shows a different button label; we click through until 'Submit application'.
     """
     for step in range(_LI_MAX_STEPS):
-        await asyncio.sleep(1.5)  # wait for modal transition animation
+        action_selector = ", ".join(
+            f"button[aria-label='{label}']" for label in _LI_LABELS
+        )
+        if await page.wait_for(action_selector, timeout=5_000, visible=True) is None:
+            logger.warning("Job %d — no LinkedIn action button on step %d", job.job_id, step)
+            break
 
         if await _has_captcha(page):
             screenshot = await _screenshot(page, job.job_id, settings.screenshots_dir, "captcha_li")
@@ -411,10 +429,9 @@ async def _linkedin_easy_apply(
 
         # Upload resume only when the file input is visible in this step
         if sel.resume_upload:
-            upload_input = await page.query_selector(sel.resume_upload)
+            upload_input = await page.find(sel.resume_upload)
             if upload_input and await upload_input.is_visible():
-                await upload_input.set_input_files(resume_path)
-                await asyncio.sleep(1)
+                await upload_input.set_file(resume_path)
 
         # Fill any visible form fields in the current step
         gate_status = await _fill_form(page, sel, job, settings)
@@ -433,7 +450,7 @@ async def _linkedin_easy_apply(
         action_btn = None
         action_label = ""
         for label in _LI_LABELS:
-            btn = await page.query_selector(f"button[aria-label='{label}']")
+            btn = await page.find(f"button[aria-label='{label}']")
             if btn and await btn.is_visible():
                 action_btn = btn
                 action_label = label
@@ -450,7 +467,7 @@ async def _linkedin_easy_apply(
         await action_btn.click()
 
         if action_label == _LI_SUBMIT_LABEL:
-            await asyncio.sleep(2)
+            await page.wait_ready(timeout=5_000)
             screenshot = await _screenshot(page, job.job_id, settings.screenshots_dir, "success_li")
             # Clicking the button is not the same as LinkedIn accepting it.
             # This used to report APPLIED on the click alone.
@@ -489,15 +506,15 @@ _LI_CONFIRMATION = re.compile(
 )
 
 
-async def _linkedin_confirmed(page: Page) -> bool:
+async def _linkedin_confirmed(page: SeleniumPage) -> bool:
     """LinkedIn's own acknowledgement that the application went through."""
     try:
-        return bool(_LI_CONFIRMATION.search(await page.inner_text("body")))
+        return bool(_LI_CONFIRMATION.search(await page.text("body")))
     except Exception:
         return False
 
 
-async def _rehearsal_result(page: Page, job: Job, settings, tag: str,
+async def _rehearsal_result(page: SeleniumPage, job: Job, settings, tag: str,
                             stopped: str = "") -> ApplyResult:
     """End a rehearsal: screenshot the page and say what's missing. Never submits.
 
@@ -524,7 +541,7 @@ async def _rehearsal_result(page: Page, job: Job, settings, tag: str,
     )
 
 
-async def _fill_form(page: Page, sel, job: Job, settings) -> Optional[JobStatus]:
+async def _fill_form(page: SeleniumPage, sel, job: Job, settings) -> Optional[JobStatus]:
     """Fill the visible form: profile-driven fields first, then LLM for the rest.
 
     Two passes, in this order:
@@ -568,9 +585,9 @@ async def _fill_form(page: Page, sel, job: Job, settings) -> Optional[JobStatus]
 
     input_fields = []
     if sel.form_text_inputs:
-        input_fields += await page.query_selector_all(sel.form_text_inputs)
+        input_fields += await page.find_all(sel.form_text_inputs)
     if sel.form_textarea_inputs:
-        input_fields += await page.query_selector_all(sel.form_textarea_inputs)
+        input_fields += await page.find_all(sel.form_textarea_inputs)
 
     for field in input_fields:
         try:
@@ -600,7 +617,7 @@ async def _fill_form(page: Page, sel, job: Job, settings) -> Optional[JobStatus]
                 continue
 
             maxlength = await field.get_attribute("maxlength")
-            tag = await field.evaluate("e => e.tagName.toLowerCase()")
+            tag = await field.tag_name()
             limit = int(maxlength) if (maxlength or "").isdigit() else (
                 2000 if tag == "textarea" else 500
             )
@@ -615,7 +632,8 @@ async def _fill_form(page: Page, sel, job: Job, settings) -> Optional[JobStatus]
 
 
 _SELECT_OPTIONS_JS = (
-    "s => [...s.options].map(o => ({value: o.value, text: (o.textContent || '').trim()}))"
+    "return Array.from(arguments[0].options).map(o => "
+    "({value: o.value, text: (o.textContent || '').trim()}));"
 )
 
 DROPDOWN_LLM_SYSTEM = """\
@@ -627,7 +645,7 @@ other personal characteristic, reply with exactly: UNKNOWN
 """
 
 
-async def _fill_remaining_dropdowns(page: Page, selector: str, job: Job, profile: dict,
+async def _fill_remaining_dropdowns(page: SeleniumPage, selector: str, job: Job, profile: dict,
                                     router, owns=None) -> None:
     """Dropdowns the profile pass did not answer.
 
@@ -646,12 +664,12 @@ async def _fill_remaining_dropdowns(page: Page, selector: str, job: Job, profile
     A required dropdown left blank stops the submission and flags the job,
     which is the correct outcome when nobody knows the answer.
     """
-    for dropdown in await page.query_selector_all(selector):
+    for dropdown in await page.find_all(selector):
         try:
             if not await dropdown.is_visible():
                 continue
-            options = [Option(**o) for o in await dropdown.evaluate(_SELECT_OPTIONS_JS)]
-            current = await dropdown.evaluate("s => s.value")
+            options = [Option(**o) for o in await dropdown.execute_script(_SELECT_OPTIONS_JS)]
+            current = await dropdown.execute_script("return arguments[0].value;")
             if any(o.value == current and not is_placeholder(o) for o in options):
                 continue
             if not real_options(options):
@@ -661,7 +679,7 @@ async def _fill_remaining_dropdowns(page: Page, selector: str, job: Job, profile
             if is_sensitive(label):
                 decline = decline_option(options)
                 if decline:
-                    await dropdown.select_option(value=decline.value)
+                    await dropdown.select(decline.value)
                 continue
             if owns is not None and owns(label):
                 # The user's own written answer decides, or nothing does.
@@ -669,19 +687,19 @@ async def _fill_remaining_dropdowns(page: Page, selector: str, job: Job, profile
                     job.user_id, label, job.company or "", job.title or "")
                 choice = choose_from_answer(written, options) if written else None
                 if choice:
-                    await dropdown.select_option(value=choice.value)
+                    await dropdown.select(choice.value)
                 continue
             if match_field(FieldContext(label=label)) is not None:
                 continue
 
             choice = await _model_choice(router, job, profile, label, options)
             if choice:
-                await dropdown.select_option(value=choice.value)
+                await dropdown.select(choice.value)
         except Exception as exc:
             logger.debug("Dropdown skipped for job %d: %s", job.job_id, exc)
 
 
-async def _fill_remaining_radios(page: Page, job: Job, profile: dict, router, owns) -> None:
+async def _fill_remaining_radios(page: SeleniumPage, job: Job, profile: dict, router, owns) -> None:
     """Radio groups the profile pass left unanswered — the same rules as dropdowns.
 
     Portals put most yes/no questions ("Comfortable working from office?",
@@ -689,7 +707,7 @@ async def _fill_remaining_radios(page: Page, job: Job, profile: dict, router, ow
     beyond the handful of profile basics.
     """
     try:
-        groups = await page.evaluate(RADIO_GROUPS_JS)
+        groups = await page.execute_script(RADIO_GROUPS_JS)
     except Exception as exc:
         logger.debug("Radio discovery skipped for job %d: %s", job.job_id, exc)
         return
@@ -740,14 +758,14 @@ async def _model_choice(router, job: Job, profile: dict, question: str,
     return resolve_llm_choice(reply, options)
 
 
-async def _get_field_label(page: Page, field) -> str:
+async def _get_field_label(page: SeleniumPage, field) -> str:
     """Resolve a human-readable label for a form field via label[for], aria-label, or placeholder."""
     try:
         field_id = await field.get_attribute("id")
         if field_id:
-            label_el = await page.query_selector(f"label[for='{field_id}']")
+            label_el = await page.find(f"label[for='{field_id}']")
             if label_el:
-                return (await label_el.inner_text()).strip()
+                return (await label_el.text()).strip()
         aria = await field.get_attribute("aria-label") or ""
         if aria:
             return aria.strip()
@@ -758,10 +776,10 @@ async def _get_field_label(page: Page, field) -> str:
         return ""
 
 
-async def _has_captcha(page: Page) -> bool:
+async def _has_captcha(page: SeleniumPage) -> bool:
     for selector in CAPTCHA_SELECTORS:
         try:
-            el = await page.query_selector(selector)
+            el = await page.find(selector)
             if el:
                 return True
         except Exception:
@@ -770,12 +788,11 @@ async def _has_captcha(page: Page) -> bool:
 
 
 async def _screenshot(
-    page: Page, job_id: int, screenshots_dir: str, suffix: str
+    page: SeleniumPage, job_id: int, screenshots_dir: str, suffix: str
 ) -> Optional[str]:
     try:
         path = str(Path(screenshots_dir) / f"job_{job_id}_{suffix}.png")
-        await page.screenshot(path=path, full_page=False)
-        return path
+        return path if await page.screenshot(path) else None
     except Exception as exc:
         logger.debug("Screenshot failed: %s", exc)
         return None
@@ -807,6 +824,7 @@ async def _update_job(
 
         if result.status == JobStatus.APPLIED:
             app = Application(
+                user_id=job.user_id,
                 job_id=job.job_id,
                 confirmation_screenshot=result.screenshot_path,
                 status=ApplicationStatus.SUBMITTED,

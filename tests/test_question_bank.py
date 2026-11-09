@@ -14,6 +14,7 @@ own words.
 from __future__ import annotations
 
 from datetime import date
+from urllib.parse import quote
 
 import pytest
 from sqlmodel import delete
@@ -404,20 +405,32 @@ FORM = """
 
 @pytest.fixture
 async def page():
-    async_playwright = pytest.importorskip("playwright.async_api").async_playwright
-    async with async_playwright() as pw:
-        try:
-            browser = await pw.chromium.launch(headless=True)
-        except Exception as exc:
-            pytest.skip(f"Chromium unavailable: {exc}")
-        page = await browser.new_page()
-        await page.set_content(FORM)
+    from selenium.common.exceptions import WebDriverException
+
+    from backend.app.config import get_settings
+    from backend.app.services.selenium_browser import selenium_session
+
+    manager = selenium_session(get_settings(), headless=True)
+    try:
+        session = await manager.__aenter__()
+    except WebDriverException as exc:
+        pytest.skip(f"Chrome WebDriver unavailable: {exc}")
+    try:
+        page = session.page
+        await page.navigate(f"data:text/html;charset=utf-8,{quote(FORM)}")
         yield page
-        await browser.close()
+    finally:
+        await manager.__aexit__(None, None, None)
 
 
 async def _value(page, selector):
-    return await page.eval_on_selector(selector, "e => e.value")
+    element = await page.find(selector)
+    return await element.input_value() if element else ""
+
+
+async def _checked(page, selector):
+    element = await page.find(selector)
+    return await element.is_selected() if element else False
 
 
 class TestInABrowser:
@@ -458,7 +471,7 @@ class TestInABrowser:
         await _fill_remaining_radios(page, job, PROFILE, router, owns)
         await _fill_remaining_dropdowns(page, "select", job, PROFILE, router, owns)
 
-        assert await page.is_checked('input[name="wfo"][value="1"]')
+        assert await _checked(page, 'input[name="wfo"][value="1"]')
         assert await _value(page, "#source") == "ref"
         assert router.calls == []
 
@@ -472,6 +485,6 @@ class TestInABrowser:
         await _fill_remaining_radios(page, job, PROFILE, router, owns)
         await _fill_remaining_dropdowns(page, "select", job, PROFILE, router, owns)
 
-        assert not await page.is_checked('input[name="wfo"][value="1"]')
+        assert not await _checked(page, 'input[name="wfo"][value="1"]')
         assert await _value(page, "#source") == ""
         assert router.calls == []

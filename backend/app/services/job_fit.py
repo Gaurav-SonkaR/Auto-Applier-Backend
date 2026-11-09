@@ -67,18 +67,39 @@ def candidate_years(profile: dict[str, Any], today: Optional[date] = None) -> Op
     if number:
         return float(number.group(0))
 
-    starts, ends = [], []
+    intervals: list[tuple[int, int]] = []
     for role in profile.get("experience") or []:
         if not isinstance(role, dict):
             continue
         start = _parse_month(str(role.get("start_date") or ""), today)
-        end = _parse_month(str(role.get("end_date") or "present"), today)
-        if start and end and end >= start:
-            starts.append(start)
-            ends.append(end)
-    if not starts:
+        raw_end = str(role.get("end_date") or "").strip()
+        # A missing end date is ambiguous; only explicit present/current
+        # markers indicate the role is ongoing.
+        if not raw_end:
+            continue
+        end = _parse_month(raw_end, today)
+        if not start or not end or end < start:
+            continue
+
+        start_month = start.year * 12 + start.month - 1
+        end_month = end.year * 12 + end.month - 1
+        end_exclusive = end_month
+        if end_exclusive > start_month:
+            intervals.append((start_month, end_exclusive))
+
+    if not intervals:
         return None
-    months = (max(ends).year - min(starts).year) * 12 + (max(ends).month - min(starts).month)
+
+    # Union employment intervals so overlapping roles aren't double-counted
+    # and unrelated career gaps aren't treated as employment.
+    intervals.sort()
+    merged: list[list[int]] = []
+    for start_month, end_month in intervals:
+        if merged and start_month <= merged[-1][1] + 1:
+            merged[-1][1] = max(merged[-1][1], end_month)
+        else:
+            merged.append([start_month, end_month])
+    months = sum(end - start for start, end in merged)
     return round(max(months, 0) / 12, 1)
 
 
@@ -107,7 +128,6 @@ def assess_fit(
     profile: dict[str, Any],
     parsed_jd: dict[str, Any],
     *,
-    experience_tolerance_years: float = 1.0,
     min_skill_overlap: float = 0.3,
     today: Optional[date] = None,
 ) -> FitResult:
@@ -127,11 +147,16 @@ def assess_fit(
     have_years = candidate_years(profile, today)
     result.years_required, result.years_have = required_years, have_years
 
-    if required_years is not None and have_years is not None:
-        if required_years > have_years + experience_tolerance_years:
+    if required_years is not None and required_years > 0:
+        if have_years is None:
             result.fits = False
             result.reasons.append(
-                f"asks for {required_years:g}+ years, profile shows {have_years:g}"
+                f"requires at least {required_years:g} years, but profile experience is unknown"
+            )
+        elif required_years > have_years:
+            result.fits = False
+            result.reasons.append(
+                f"requires at least {required_years:g} years, profile shows {have_years:g}"
             )
 
     required_skills = [s for s in (parsed_jd.get("required_skills") or []) if str(s).strip()]

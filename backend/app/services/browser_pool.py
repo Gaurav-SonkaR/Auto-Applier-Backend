@@ -12,18 +12,19 @@ _semaphores: dict[int, asyncio.Semaphore] = {}
 
 def browser_semaphore() -> asyncio.Semaphore:
     """
-    Cap concurrent Playwright browser launches at PLAYWRIGHT_MAX_BROWSERS.
+    Cap concurrent Selenium WebDriver sessions at SELENIUM_MAX_DRIVERS.
 
-    Chromium costs ~600-800MB per instance on this app's 8GB-RAM target;
-    every browser-launching call site must acquire this before launching:
+    Chromium costs hundreds of MB per instance; all browser workflows share
+    this per-event-loop cap before creating a driver:
 
         async with browser_semaphore():
-            browser = await pw.chromium.launch(...)
+            async with selenium_session(settings) as session:
+                ...
     """
     loop = asyncio.get_running_loop()
     sem = _semaphores.get(id(loop))
     if sem is None:
-        sem = asyncio.Semaphore(get_settings().playwright_max_browsers)
+        sem = asyncio.Semaphore(get_settings().selenium_max_drivers)
         _semaphores[id(loop)] = sem
     return sem
 

@@ -14,6 +14,7 @@ class PipelineState(TypedDict):
     checkpoint/serialize the state without custom serializers.
     """
     job_id: int
+    user_id: Optional[int]
     url: str
     portal: str
     title: str

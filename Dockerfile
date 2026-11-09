@@ -4,7 +4,7 @@
 # the base image is multi-arch so it builds on x86 dev machines unchanged.
 #
 # Two stages: the builder compiles wheels, the runtime carries none of the build
-# toolchain. That matters here because Playwright's Chromium and a TeX Live
+# toolchain. That matters here because Chromium and a TeX Live
 # subset already make this image large.
 
 # ── Stage 1: build Python wheels ─────────────────────────────────────────────
@@ -29,21 +29,20 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    # Keep browsers inside the image rather than the default per-user cache,
-    # so they survive the non-root switch below.
-    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+    CHROME_BINARY=/usr/bin/chromium
 
 # texlive-* : pdflatex for resume compilation (FR-003).
 #   We install only the collections the template needs (geometry, titlesec,
 #   enumitem, hyperref, lmodern, microtype) rather than texlive-full, which is
 #   ~5GB and would blow the free tier's 100GB storage budget (NFR-004) for no
 #   benefit — the template deliberately avoids exotic packages.
-# The rest are Chromium's shared-library dependencies.
+# Chromium and its matching driver are installed from the same Debian repo.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         texlive-latex-base \
         texlive-latex-recommended \
         texlive-fonts-recommended \
         texlive-latex-extra \
+    chromium chromium-driver \
         libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
         libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
         libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 \
@@ -55,9 +54,6 @@ COPY requirements.txt .
 RUN pip install --no-index --find-links=/wheels -r requirements.txt \
     && rm -rf /wheels requirements.txt
 
-# Chromium only — the other engines are unused and each adds ~300MB.
-RUN playwright install chromium
-
 WORKDIR /app
 COPY backend/ ./backend/
 COPY templates/ ./templates/
@@ -67,7 +63,7 @@ COPY master_profile.json ./
 # Non-root. Volumes are chowned so the container can write its DB and PDFs.
 RUN useradd --create-home --uid 1000 autoapply \
     && mkdir -p /app/data /app/resumes /app/screenshots /app/logs \
-    && chown -R autoapply:autoapply /app /opt/playwright
+    && chown -R autoapply:autoapply /app
 USER autoapply
 
 EXPOSE 8000

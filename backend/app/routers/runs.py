@@ -76,6 +76,15 @@ async def start_run(
     request: RunStartRequest, user: User = Depends(require_auth)
 ) -> RunStartResponse:
     """Start a portal apply run in the background. Returns run_id immediately."""
+    if any(
+        owner_id == user.user_id and not task.done()
+        for owner_id, task in _active_tasks.values()
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="A run is already active for this account. Stop it or wait for it to finish.",
+        )
+
     # Pre-create RunLog so client gets a real ID before the task starts
     with Session(engine) as session:
         run_log = RunLog(

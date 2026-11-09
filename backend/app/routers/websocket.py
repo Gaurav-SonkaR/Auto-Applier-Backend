@@ -4,7 +4,10 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from sqlmodel import Session
 
+from backend.app.database import engine
+from backend.app.models.run_log import RunLog
 from backend.app.routers.auth import authenticate_token
 
 logger = logging.getLogger("api.ws")
@@ -67,11 +70,17 @@ async def websocket_run_events(
     before `accept()`, so an unauthenticated client never gets a live socket
     or sees a single event.
     """
-    if authenticate_token(token) is None:
+    user = authenticate_token(token)
+    with Session(engine) as session:
+        run = session.get(RunLog, run_id)
+        owns_run = run is not None and run.user_id == user.user_id if user else False
+
+    if not owns_run:
         # 1008 = policy violation. Closing pre-accept is the documented way to
-        # refuse a WS handshake.
+        # refuse a WS handshake. Use the same response for missing and
+        # cross-account runs so run ids cannot be enumerated.
         await ws.close(code=status.WS_1008_POLICY_VIOLATION)
-        logger.warning("Rejected unauthenticated WS connection for run_id=%d", run_id)
+        logger.warning("Rejected unauthorized WS connection for run_id=%d", run_id)
         return
 
     await manager.connect(run_id, ws)

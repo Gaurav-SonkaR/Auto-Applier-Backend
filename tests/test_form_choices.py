@@ -9,6 +9,7 @@ glue in a real browser against a representative form — no live portal.
 from __future__ import annotations
 
 import pytest
+from urllib.parse import quote
 
 from backend.app.services.form_choices import (
     Option,
@@ -220,20 +221,32 @@ PROFILE = {
 
 @pytest.fixture
 async def page():
-    async_playwright = pytest.importorskip("playwright.async_api").async_playwright
-    async with async_playwright() as pw:
-        try:
-            browser = await pw.chromium.launch(headless=True)
-        except Exception as exc:                      # browser binary not installed
-            pytest.skip(f"Chromium unavailable: {exc}")
-        page = await browser.new_page()
-        await page.set_content(FORM_HTML)
+    from selenium.common.exceptions import WebDriverException
+
+    from backend.app.config import get_settings
+    from backend.app.services.selenium_browser import selenium_session
+
+    manager = selenium_session(get_settings(), headless=True)
+    try:
+        session = await manager.__aenter__()
+    except WebDriverException as exc:
+        pytest.skip(f"Chrome WebDriver unavailable: {exc}")
+    try:
+        page = session.page
+        await page.navigate(f"data:text/html;charset=utf-8,{quote(FORM_HTML)}")
         yield page
-        await browser.close()
+    finally:
+        await manager.__aexit__(None, None, None)
 
 
 async def _value(page, selector):
-    return await page.eval_on_selector(selector, "e => e.value")
+    element = await page.find(selector)
+    return await element.input_value() if element else ""
+
+
+async def _checked(page, selector):
+    element = await page.find(selector)
+    return await element.is_selected() if element else False
 
 
 class TestAutofillInABrowser:
@@ -245,8 +258,8 @@ class TestAutofillInABrowser:
         assert await _value(page, "#reloc") == "yes"
         assert await _value(page, "#notice") == "30"        # "30 days" -> "1 Month"
         assert await _value(page, "#exp") == "b"            # 2 -> "2-4 years"
-        assert await page.is_checked('input[name="visa"][value="0"]')
-        assert not await page.is_checked('input[name="visa"][value="1"]')
+        assert await _checked(page, 'input[name="visa"][value="0"]')
+        assert not await _checked(page, 'input[name="visa"][value="1"]')
 
     async def test_gender_is_declined_not_answered(self, page):
         from backend.app.services.form_autofill import autofill_form
@@ -276,7 +289,7 @@ class TestAutofillInABrowser:
     async def test_a_value_already_set_by_the_portal_is_kept(self, page):
         from backend.app.services.form_autofill import autofill_form
 
-        await page.select_option("#reloc", "no")
+        await (await page.find("#reloc")).select("no")
         await autofill_form(page, PROFILE)
         assert await _value(page, "#reloc") == "no"
 

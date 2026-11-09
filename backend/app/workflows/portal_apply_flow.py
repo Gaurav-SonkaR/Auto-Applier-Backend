@@ -5,9 +5,11 @@ import logging
 import time
 from datetime import datetime, timezone
 from typing import Optional
+from sqlalchemy import and_, or_
 
 from sqlmodel import Session, select
 
+from backend.app.config import get_settings
 from backend.app.database import engine, init
 from backend.app.models.job import Job, JobStatus
 from backend.app.models.run_log import RunLog, RunType
@@ -90,13 +92,20 @@ async def run_portal_apply(
     init()
     t0 = time.monotonic()
     result = RunResult(run_id=None)
+    requested_batch_size = config.batch_size
+    batch_size = min(requested_batch_size, get_settings().apply_batch_size)
+    if batch_size < requested_batch_size:
+        logger.warning(
+            "Run batch capped from %d to configured apply_batch_size=%d",
+            requested_batch_size, batch_size,
+        )
 
     # A blank job_title means "search from my master resume" — resolve it before
     # anything else so the RunLog snapshot records the query actually used.
     query, query_source = resolve_search_query(config.job_title, config.user_id)
     snapshot = {
         "portal": config.portal, "job_title": query,
-        "location": config.location, "batch_size": config.batch_size,
+        "location": config.location, "batch_size": batch_size,
         "query_source": query_source,
     }
 
@@ -145,7 +154,7 @@ async def run_portal_apply(
         if resume_path:
             try:
                 new_jobs = await scrape_recommended_jobs(
-                    config.portal, resume_path, config.location, config.batch_size,
+                    config.portal, resume_path, config.location, batch_size,
                     user_id=config.user_id,
                 )
                 if new_jobs:
@@ -162,7 +171,7 @@ async def run_portal_apply(
     if not new_jobs:
         try:
             new_jobs = await scrape_jobs(
-                config.portal, query, config.location, config.batch_size,
+                config.portal, query, config.location, batch_size,
                 user_id=config.user_id,
             )
         except Exception as exc:
@@ -174,17 +183,22 @@ async def run_portal_apply(
     logger.info("Run %d: scraped %d new jobs", run_log_id, len(new_jobs))
 
     # 2. Collect checkpointed jobs (PARSED / RESUME_READY = can skip earlier nodes)
-    all_job_ids: list[int] = [j.job_id for j in new_jobs if j.job_id]
+    all_job_ids: list[int] = [j.job_id for j in new_jobs if j.job_id][:batch_size]
     if config.include_checkpointed:
         with Session(engine) as session:
             checkpoint_jobs = session.exec(
                 select(Job).where(
                     Job.user_id == config.user_id,
                     Job.portal == config.portal,
-                    Job.status.in_([JobStatus.PARSED, JobStatus.RESUME_READY]),  # type: ignore[attr-defined]
+                    or_(
+                        Job.status.in_([JobStatus.PARSED, JobStatus.RESUME_READY]),
+                        and_(Job.status == JobStatus.SCRAPED, Job.retry_count > 0),
+                    ),
                 )
             ).all()
             for j in checkpoint_jobs:
+                if len(all_job_ids) >= batch_size:
+                    break
                 if j.job_id not in all_job_ids:
                     all_job_ids.append(j.job_id)
             if checkpoint_jobs:

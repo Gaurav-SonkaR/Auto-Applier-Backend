@@ -457,6 +457,18 @@ class TestWebSocketAuth:
             with anon_client.websocket_connect("/ws/runs/1?token=garbage"):
                 pass
 
-    def test_accepts_a_valid_token(self, anon_client, token):
-        with anon_client.websocket_connect(f"/ws/runs/1?token={token}") as ws:
+    def test_accepts_a_valid_token_for_its_own_run(self, anon_client, token, admin_user):
+        from sqlmodel import Session
+
+        from backend.app.database import engine
+        from backend.app.models.run_log import RunLog, RunType
+
+        with Session(engine) as session:
+            run = RunLog(user_id=admin_user.user_id, run_type=RunType.PORTAL_APPLY)
+            session.add(run)
+            session.commit()
+            session.refresh(run)
+            run_id = run.run_id
+
+        with anon_client.websocket_connect(f"/ws/runs/{run_id}?token={token}") as ws:
             assert ws is not None

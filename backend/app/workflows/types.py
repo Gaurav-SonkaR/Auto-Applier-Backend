@@ -10,7 +10,7 @@ class ParsedJD:
     required_skills: list[str] = field(default_factory=list)
     nice_to_have: list[str] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)
-    experience_years: Optional[int] = None
+    experience_years: Optional[float] = None
     role_level: str = "mid"  # junior / mid / senior / lead
     raw: dict = field(default_factory=dict)
 

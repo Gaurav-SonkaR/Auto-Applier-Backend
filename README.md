@@ -1,6 +1,6 @@
 # AutoApply AI
 
-A local-only autonomous job application system. Scrapes job portals, generates ATS-tailored LaTeX resumes via Groq LLM, auto-fills application forms with Playwright, and sends cold emails — all from your machine. Nothing leaves your network except LLM API calls.
+A local-only autonomous job application system. Scrapes job portals, generates ATS-tailored LaTeX resumes via Groq LLM, auto-fills application forms with Selenium, and sends cold emails — all from your machine. Nothing leaves your network except LLM API calls.
 
 ---
 
@@ -42,7 +42,7 @@ Backend (FastAPI :8000)
 git clone <repo-url>
 cd agentic
 py -m pip install -r requirements.txt
-py -m playwright install chromium
+# Install Google Chrome or Chromium. Selenium Manager resolves a matching driver.
 ```
 
 ### 2. Pull Ollama models
@@ -183,7 +183,7 @@ Auto-Applier-Backend/
 ├── tests/                     # pytest suite
 ├── data/                      # SQLite DB + ChromaDB (gitignored)
 ├── resumes/                   # Generated PDFs; library/ holds uploads (gitignored)
-├── screenshots/               # Playwright screenshots (gitignored)
+├── screenshots/               # Selenium apply-time screenshots (gitignored)
 ├── logs/                      # App logs + saved portal sessions (gitignored)
 ├── master_profile.json
 ├── Dockerfile
@@ -246,7 +246,9 @@ pytest
 | `GMAIL_ADDRESS` | For cold email | — | Gmail address |
 | `GMAIL_APP_PASSWORD` | For cold email | — | Gmail App Password (not regular password) |
 | `COLD_EMAIL_DAILY_LIMIT` | No | `40` | Max emails per day |
-| `PLAYWRIGHT_HEADLESS` | No | `true` | Set `false` to watch the browser |
+| `SELENIUM_HEADLESS` | No | `true` | Set `false` to watch the browser |
+| `SELENIUM_MAX_DRIVERS` | No | `2` | Maximum concurrent Selenium browser sessions |
+| `CHROME_BINARY` | No | auto-detected | Optional Chrome/Chromium executable path |
 | `RESUME_MAX_RETRIES` | No | `3` | Max LLM retries for ATS score |
 | `ATS_SCORE_THRESHOLD` | No | `85` | Minimum ATS keyword match % |
 | `DAILY_SEARCH_LIMIT` | No | `100` | Max Serper searches per day |

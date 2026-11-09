@@ -188,6 +188,26 @@ class TestResumeIsolation:
         session.expire_all()
         assert session.get(Resume, other_resume.resume_id).is_master is True
 
+    def test_pipeline_resume_fallback_never_uses_another_users_resume(
+        self, session, other_resume, admin_user
+    ):
+        from pathlib import Path
+
+        from backend.app.workflows.run_loop import _best_uploaded_resume
+
+        private_resume = session.get(Resume, other_resume.resume_id)
+        private_resume.extracted_text = "PRIVATE_SKILL"
+        private_resume.extracted_skills = '["private_skill"]'
+        session.add(private_resume)
+        session.commit()
+
+        selected = _best_uploaded_resume(
+            session, {"keywords": ["private_skill"]}, admin_user.user_id
+        )
+        assert selected
+        assert selected != private_resume.file_path
+        assert str(admin_user.user_id) in Path(selected).parts
+
 
 class TestRunIsolation:
     @pytest.fixture
@@ -209,6 +229,81 @@ class TestRunIsolation:
 
     def test_cannot_stop_another_users_run(self, client, other_run):
         assert client.post(f"/api/runs/{other_run.run_id}/stop").status_code == 404
+
+    def test_cannot_subscribe_to_another_users_run_websocket(
+        self, anon_client, auth_token, other_run
+    ):
+        from starlette.websockets import WebSocketDisconnect
+
+        with pytest.raises(WebSocketDisconnect):
+            with anon_client.websocket_connect(
+                f"/ws/runs/{other_run.run_id}?token={auth_token}"
+            ):
+                pass
+
+    def test_owner_can_subscribe_to_their_own_run_websocket(
+        self, anon_client, other_headers, other_run
+    ):
+        token = other_headers["Authorization"].removeprefix("Bearer ")
+        with anon_client.websocket_connect(
+            f"/ws/runs/{other_run.run_id}?token={token}"
+        ) as ws:
+            assert ws is not None
+
+    def test_one_user_cannot_start_a_second_active_run(self, client, admin_user, monkeypatch):
+        from types import SimpleNamespace
+
+        from backend.app.routers import runs as runs_router
+
+        monkeypatch.setattr(
+            runs_router,
+            "_active_tasks",
+            {999: (admin_user.user_id, SimpleNamespace(done=lambda: False))},
+        )
+        response = client.post("/api/runs/start", json={
+            "portal": "linkedin", "job_title": "Engineer", "location": "",
+            "batch_size": 1,
+        })
+        assert response.status_code == 409
+
+
+class TestResumeUploadPathIsolation:
+    def test_same_name_uploads_have_distinct_owned_files(
+        self, client, anon_client, other_headers, session, monkeypatch,
+    ):
+        from datetime import datetime
+        from pathlib import Path
+
+        from backend.app.models.resume import Resume
+        from backend.app.routers import resumes as resume_router
+        from tests.test_resume_library import BACKEND_RESUME
+
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 9, 29, 12, 0, 0, tzinfo=tz)
+
+        monkeypatch.setattr(resume_router, "datetime", FrozenDateTime)
+        own_response = client.post(
+            "/api/resumes/library",
+            files={"file": ("same.pdf", BACKEND_RESUME, "application/pdf")},
+        )
+        other_response = anon_client.post(
+            "/api/resumes/library",
+            files={"file": ("same.pdf", BACKEND_RESUME, "application/pdf")},
+            headers=other_headers,
+        )
+        assert own_response.status_code == other_response.status_code == 201
+
+        own_id = own_response.json()["resume"]["resume_id"]
+        other_id = other_response.json()["resume"]["resume_id"]
+        session.expire_all()
+        own_path = session.get(Resume, own_id).file_path
+        other_path = session.get(Resume, other_id).file_path
+        assert own_path != other_path
+
+        assert client.delete(f"/api/resumes/library/{own_id}").status_code == 204
+        assert Path(other_path).exists()
 
 
 class TestColdEmailIsolation:

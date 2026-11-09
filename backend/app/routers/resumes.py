@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,10 +36,10 @@ resumes_router = APIRouter(prefix="/api/resumes", tags=["resumes"])
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB — a resume PDF is well under 1 MB
 
 
-def _library_dir() -> Path:
+def _library_dir(user_id: int) -> Path:
     """Uploaded resumes live beside generated ones but in their own subfolder,
     so `resolve_contained_path` containment still holds for both."""
-    path = Path(get_settings().resumes_dir) / "library"
+    path = Path(get_settings().resumes_dir) / "library" / str(user_id)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -119,7 +120,8 @@ async def upload_resume(
     # Never trust the client's filename on disk — it can carry path separators.
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     safe_stem = sanitize(Path(file.filename).stem, 60, fallback="resume")
-    dest = _library_dir() / f"{safe_stem}_{stamp}.pdf"
+    unique = secrets.token_hex(8)
+    dest = _library_dir(user.user_id) / f"{safe_stem}_{stamp}_{unique}.pdf"
     dest.write_bytes(payload)
 
     try:

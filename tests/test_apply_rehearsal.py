@@ -87,18 +87,29 @@ def portal_job(tmp_path, session, make_job, monkeypatch):
 
 @pytest.fixture
 async def page():
-    async_playwright = pytest.importorskip("playwright.async_api").async_playwright
-    async with async_playwright() as pw:
-        try:
-            browser = await pw.chromium.launch(headless=True)
-        except Exception as exc:
-            pytest.skip(f"Chromium unavailable: {exc}")
-        yield await browser.new_page()
-        await browser.close()
+    from selenium.common.exceptions import WebDriverException
+
+    from backend.app.config import get_settings
+    from backend.app.services.selenium_browser import selenium_session
+
+    manager = selenium_session(get_settings(), headless=True)
+    try:
+        session = await manager.__aenter__()
+    except WebDriverException as exc:
+        pytest.skip(f"Chrome WebDriver unavailable: {exc}")
+    try:
+        yield session.page
+    finally:
+        await manager.__aexit__(None, None, None)
 
 
 async def _flag(page, name):
-    return await page.evaluate(f"() => window.{name} === true")
+    return await page.execute_script("return window[arguments[0]] === true;", name)
+
+
+async def _value(page, selector):
+    element = await page.find(selector)
+    return await element.input_value() if element else ""
 
 
 class TestSinglePageRehearsal:
@@ -108,8 +119,8 @@ class TestSinglePageRehearsal:
 
         assert not await _flag(page, "__submitted")
         assert result.status == JobStatus.NEED_HUMAN_ACTION
-        assert await page.input_value("#name") == "Asha Verma"
-        assert await page.input_value("#email") == "asha@example.com"
+        assert await _value(page, "#name") == "Asha Verma"
+        assert await _value(page, "#email") == "asha@example.com"
 
     async def test_it_reports_what_is_still_blank(self, page, portal_job, settings, tmp_path):
         job = portal_job()
@@ -126,6 +137,17 @@ class TestSinglePageRehearsal:
 
         assert await _flag(page, "__submitted")
         assert result.status == JobStatus.APPLIED
+
+    async def test_unconfirmed_submission_requires_human_review(
+        self, page, portal_job, settings
+    ):
+        html = PORTAL_PAGE.replace("'<div id=done>Applied</div>'", "''")
+        job = portal_job(html)
+        result = await applier._run_apply_flow(page, job, "", Template(), settings)
+
+        assert await _flag(page, "__submitted")
+        assert result.status == JobStatus.NEED_HUMAN_ACTION
+        assert "before retrying" in result.reason
 
     async def test_it_stops_before_an_apply_button_that_submits(self, page, portal_job, settings):
         """Naukri and Instahyre can apply on the Apply click alone."""
@@ -145,7 +167,7 @@ class TestLinkedInEasyApply:
 
     async def _run(self, page, portal_job, settings, dry_run, confirm=""):
         job = portal_job(LINKEDIN_STEP.format(confirm=confirm), portal="linkedin")
-        await page.goto(job.url)
+        await page.navigate(job.url)
         return await applier._linkedin_easy_apply(page, job, "", self.SEL, settings, dry_run)
 
     async def test_a_rehearsal_does_not_press_submit(self, page, portal_job, settings):

@@ -185,7 +185,11 @@ async def generate_resume(
             )
             _validate_locked_fields(result_json, locked_strings(profile))
 
-            ats_score = _compute_ats_score(result_json, parsed_jd)
+            latex = _inject_into_template(base_latex, result_json)
+            # Score the content that will actually be compiled, not the
+            # model's `ats_keywords_used` self-report (which is not rendered).
+            scoring_input = {"rendered_resume": latex}
+            ats_score = _compute_ats_score(scoring_input, parsed_jd)
             logger.info("Job %d: ATS score=%d%% (attempt %d)", job_id, ats_score, attempt + 1)
 
             if ats_score < settings.ats_min_score and attempt < settings.resume_max_retries - 1:
@@ -193,7 +197,7 @@ async def generate_resume(
                 # `parsed_jd.keywords` meant a retry triggered by missing
                 # *required_skills* was handed an empty hint list, and the next
                 # attempt had no more to go on than the first.
-                missed = _missing_terms(result_json, parsed_jd)
+                missed = _missing_terms(scoring_input, parsed_jd)
                 logger.warning(
                     "ATS score %d%% < %d%% — retrying. Missed keywords: %s",
                     ats_score, settings.ats_min_score, missed,
@@ -201,7 +205,12 @@ async def generate_resume(
                 prompt = _build_prompt(profile, parsed_jd, missed_keywords=missed)
                 continue
 
-            latex = _inject_into_template(base_latex, result_json)
+            if ats_score < settings.ats_min_score:
+                raise ValueError(
+                    f"Rendered resume scored {ats_score}% ATS keyword coverage; "
+                    f"minimum is {settings.ats_min_score}%"
+                )
+
             # pdflatex takes 1-5s per compile — run in a worker thread so the
             # event loop (and every dashboard request) isn't stalled meanwhile.
             pdf_path = await asyncio.to_thread(compile_resume_from_string, latex, output_path)
@@ -345,7 +354,21 @@ def _missing_terms(result: dict, parsed_jd: ParsedJD) -> list[str]:
     never disagree: what the score penalises is exactly what the retry is told
     to add.
     """
-    result_text = json.dumps(result).lower()
+    rendered_resume = result.get("rendered_resume")
+    if isinstance(rendered_resume, str):
+        result_text = rendered_resume.lower()
+    else:
+        # Do not let the model's non-rendered ats_keywords_used field improve
+        # its own score. Only content that may actually enter the template is
+        # considered here.
+        visible = {
+            key: result.get(key)
+            for key in (
+                "professional_summary", "experience_bullets",
+                "project_bullets", "secondary_skills_to_include",
+            )
+        }
+        result_text = json.dumps(visible).lower()
     return [term for term in parsed_jd.all_keywords() if term not in result_text]
 
 

@@ -6,7 +6,7 @@ degrades output — injection just no-ops and the generic seed resume ships to
 the employer. These tests fail loudly instead.
 
 Imports only the constants from resume_generator, not the module's runtime
-dependencies, so they run without groq/playwright installed.
+dependencies, so they run without Groq or Selenium installed.
 """
 import re
 from pathlib import Path

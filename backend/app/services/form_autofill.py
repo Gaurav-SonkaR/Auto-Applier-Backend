@@ -10,8 +10,8 @@ or evade those gates; it reports the gate as a JobStatus so the pipeline flags t
 job for the user to complete the single manual step, then resume.
 
 The matching logic (build_autofill_values / match_field / detect_gate) is pure and
-unit-tested; the async autofill_form() wrapper is the only part that touches
-Playwright, so the rules can be validated without a browser.
+unit-tested; the async autofill_form() wrapper is the only part that touches the
+Selenium-backed page interface, so the rules remain testable without a browser.
 """
 
 import logging
@@ -238,7 +238,7 @@ def detect_gate(page_text: str, autocomplete_values: tuple[str, ...] = ()) -> Ga
     return Gate.NONE
 
 
-# ── Playwright wrapper ─────────────────────────────────────────────────────────
+# ── Selenium page wrapper ──────────────────────────────────────────────────────
 
 _SKIP_TYPES = frozenset(
     {"password", "hidden", "file", "submit", "button", "checkbox", "radio", "image", "reset"}
@@ -261,7 +261,7 @@ async def autofill_form(page, profile: dict,
     owns = owns_question or (lambda _label: False)
     vocabulary = _skill_vocabulary()
 
-    elements = await page.query_selector_all("input, textarea")
+    elements = await page.find_all("input, textarea")
     for el in elements:
         input_type = (await el.get_attribute("type") or "text").lower()
         if input_type in _SKIP_TYPES:
@@ -310,7 +310,7 @@ async def autofill_form(page, profile: dict,
 
     gate = Gate.NONE
     try:
-        page_text = await page.inner_text("body")
+        page_text = await page.text("body")
         gate = detect_gate(page_text, tuple(autocompletes))
     except Exception as exc:
         logger.debug("Gate detection skipped: %s", exc)
@@ -323,14 +323,15 @@ async def autofill_form(page, profile: dict,
 
 
 _OPTIONS_JS = (
-    "s => [...s.options].map(o => ({value: o.value, text: (o.textContent || '').trim()}))"
+    "return Array.from(arguments[0].options).map(o => "
+    "({value: o.value, text: (o.textContent || '').trim()}));"
 )
 
 # Tags every radio with a stable handle, then reports each group with its
 # question text. Tagging in the page and clicking by tag avoids rebuilding a
 # CSS selector out of arbitrary portal-supplied names and values.
 RADIO_GROUPS_JS = """
-() => {
+return (() => {
   const radios = [...document.querySelectorAll('input[type=radio]')]
     .filter(r => r.name && !r.disabled);
   const groups = new Map();
@@ -373,7 +374,7 @@ RADIO_GROUPS_JS = """
     g += 1;
   }
   return out;
-}
+})();
 """
 
 
@@ -387,7 +388,7 @@ def _skill_vocabulary() -> frozenset[str]:
 
 
 _UNANSWERED_REQUIRED_JS = """
-() => {
+return (() => {
   const visible = (e) => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
   const required = (e) => e.required || e.getAttribute('aria-required') === 'true';
   const labelOf = (e) => {
@@ -413,7 +414,7 @@ _UNANSWERED_REQUIRED_JS = """
     }
   }
   return [...out].filter(Boolean);
-}
+})();
 """
 
 
@@ -424,7 +425,7 @@ async def unanswered_required(page) -> list[str]:
     application could be submitted for real.
     """
     try:
-        return list(await page.evaluate(_UNANSWERED_REQUIRED_JS))
+        return list(await page.execute_script(_UNANSWERED_REQUIRED_JS))
     except Exception as exc:
         logger.debug("Required-field scan skipped: %s", exc)
         return []
@@ -439,12 +440,12 @@ async def _fill_dropdowns(page, values: dict[str, str], profile: dict,
     value (by the portal, from the account) is left as it is.
     """
     filled: list[str] = []
-    for el in await page.query_selector_all("select"):
+    for el in await page.find_all("select"):
         try:
             if not await el.is_visible():
                 continue
-            options = [Option(**o) for o in await el.evaluate(_OPTIONS_JS)]
-            current = await el.evaluate("s => s.value")
+            options = [Option(**o) for o in await el.execute_script(_OPTIONS_JS)]
+            current = await el.execute_script("return arguments[0].value;")
             if any(o.value == current and not is_placeholder(o) for o in options):
                 continue
 
@@ -458,7 +459,7 @@ async def _fill_dropdowns(page, values: dict[str, str], profile: dict,
             if is_sensitive(question):
                 decline = decline_option(options)
                 if decline:
-                    await el.select_option(value=decline.value)
+                    await el.select(decline.value)
                     filled.append("declined_self_identification")
                 continue
             if owns(question):
@@ -472,7 +473,7 @@ async def _fill_dropdowns(page, values: dict[str, str], profile: dict,
                 key = match_field(ctx)
                 choice = choose_option(key, values.get(key, ""), options) if key else None
             if choice:
-                await el.select_option(value=choice.value)
+                await el.select(choice.value)
                 filled.append(key)
         except Exception as exc:
             logger.debug("Dropdown skipped: %s", exc)
@@ -484,7 +485,7 @@ async def _fill_radio_groups(page, values: dict[str, str],
     """Same rules as dropdowns, for Yes/No style radio groups."""
     filled: list[str] = []
     try:
-        groups = await page.evaluate(RADIO_GROUPS_JS)
+        groups = await page.execute_script(RADIO_GROUPS_JS)
     except Exception as exc:
         logger.debug("Radio discovery skipped: %s", exc)
         return filled
@@ -521,14 +522,14 @@ async def _label_text(page, el) -> str:
     try:
         field_id = await el.get_attribute("id")
         if field_id:
-            label = await page.query_selector(f'label[for="{field_id}"]')
+            label = await page.find(f'label[for="{field_id}"]')
             if label:
-                return ((await label.inner_text()) or "").strip()
+                return (await label.text()).strip()
         aria = await el.get_attribute("aria-label")
         if aria:
             return aria.strip()
-        return (await el.evaluate(
-            "e => { const l = e.closest('label'); return l ? (l.textContent || '').trim() : ''; }"
+        return (await el.execute_script(
+            "const l = arguments[0].closest('label'); return l ? (l.textContent || '').trim() : '';"
         )) or ""
     except Exception:
         return ""
